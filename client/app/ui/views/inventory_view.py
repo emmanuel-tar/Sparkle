@@ -7,7 +7,7 @@ Displays product list, allows search, filtering, and basic inventory actions.
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QFrame, QMessageBox,
+    QComboBox, QFrame, QMessageBox, QFileDialog, QMenu,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QIcon
@@ -56,7 +56,27 @@ class InventoryView(QWidget):
         self.add_btn.setMinimumHeight(40)
         self.add_btn.setCursor(Qt.PointingHandCursor)
         self.add_btn.clicked.connect(self._on_add_product)
+        
+        # Permission check
+        if not api_client.has_permission("manage_inventory"):
+            self.add_btn.setEnabled(False)
+            self.add_btn.setToolTip("You do not have permission to add products")
+            
         header.addWidget(self.add_btn)
+        
+        # Tools Menu (Import/Export)
+        self.tools_btn = QPushButton(" ⚙️ Tools")
+        self.tools_btn.setMinimumHeight(40)
+        self.tools_btn.setCursor(Qt.PointingHandCursor)
+        
+        tools_menu = QMenu(self)
+        tools_menu.addAction("📥 Import Inventory", self._on_import_inventory)
+        tools_menu.addAction("📤 Export Inventory", self._on_export_inventory)
+        tools_menu.addSeparator()
+        tools_menu.addAction("📝 Download Template", self._on_download_template)
+        
+        self.tools_btn.setMenu(tools_menu)
+        header.addWidget(self.tools_btn)
         
         self.refresh_btn = QPushButton(" Refresh")
         self.refresh_btn.setMinimumHeight(40)
@@ -263,19 +283,27 @@ class InventoryView(QWidget):
                 return btn
 
             # Edit
-            edit_btn = create_icon_btn("✏️", "#4dabf7", "Edit Product", lambda p=product: self._on_edit_product(p))
+            can_manage = api_client.has_permission("manage_inventory")
+            is_admin = api_client.user_role in ["super_admin", "admin"]
+            
+            edit_btn = create_icon_btn("✏️", "#4dabf7", "Edit Product", lambda _, p=product: self._on_edit_product(p))
+            edit_btn.setEnabled(can_manage)
             actions_layout.addWidget(edit_btn)
             
             # Stock Adjust
-            adjust_btn = create_icon_btn("📦", "#ffd43b", "Stock Adjustment", lambda p=product: self._on_adjust_stock(p))
+            adjust_btn = create_icon_btn("📦", "#ffd43b", "Stock Adjustment", lambda _, p=product: self._on_adjust_stock(p))
+            adjust_btn.setEnabled(can_manage)
             actions_layout.addWidget(adjust_btn)
             
             # History
-            history_btn = create_icon_btn("📜", "#63e6be", "Movement History", lambda p=product: self._on_view_history(p))
+            history_btn = create_icon_btn("📜", "#63e6be", "Movement History", lambda _, p=product: self._on_view_history(p))
             actions_layout.addWidget(history_btn)
             
             # Delete
-            delete_btn = create_icon_btn("🗑️", "#ff6b6b", "Delete Product", lambda p=product: self._on_delete_product(p))
+            delete_btn = create_icon_btn("🗑️", "#ff6b6b", "Delete Product", lambda _, p=product: self._on_delete_product(p))
+            delete_btn.setEnabled(is_admin)
+            if not is_admin:
+                delete_btn.setStyleSheet(delete_btn.styleSheet() + "QPushButton { opacity: 0.5; }")
             actions_layout.addWidget(delete_btn)
             
             actions_layout.addStretch()
@@ -306,20 +334,66 @@ class InventoryView(QWidget):
         dialog = HistoryDialog(self, product)
         dialog.exec()
 
-    def _on_delete_product(self, product: dict):
-        """Delete a product with confirmation."""
+    def _on_delete_product(self, product):
+        """Handle product deletion."""
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            f"Are you sure you want to delete '{product['name']}'?\nThis will deactivate the product.",
+            f"Are you sure you want to delete {product.get('name')}?\nThis will deactivate the product.",
             QMessageBox.Yes | QMessageBox.No
         )
-        
         if reply == QMessageBox.Yes:
             try:
                 api_client.delete_item(product["id"])
                 self._load_data()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete product: {e}")
+                QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
+
+    # ============== Bulk Operations ==============
+
+    def _on_export_inventory(self):
+        """Export inventory to CSV."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Inventory", f"inventory_export.csv", "CSV Files (*.csv)"
+        )
+        if path:
+            try:
+                data = api_client.export_inventory()
+                with open(path, "wb") as f:
+                    f.write(data)
+                QMessageBox.information(self, "Success", "Inventory exported successfully!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Export failed: {e}")
+
+    def _on_import_inventory(self):
+        """Import inventory from CSV."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Inventory", "", "CSV Files (*.csv)"
+        )
+        if path:
+            try:
+                result = api_client.import_inventory(path)
+                msg = f"Import Complete!\n\nImported: {result.get('imported_count', 0)}\nErrors: {len(result.get('errors', []))}"
+                if result.get("errors"):
+                    msg += f"\n\nFirst few errors:\n" + "\n".join(result["errors"][:5])
+                
+                QMessageBox.information(self, "Import Result", msg)
+                self._load_data()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Import failed: {e}")
+
+    def _on_download_template(self):
+        """Download import template."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Template", "inventory_template.csv", "CSV Files (*.csv)"
+        )
+        if path:
+            try:
+                data = api_client.get_import_template()
+                with open(path, "wb") as f:
+                    f.write(data)
+                QMessageBox.information(self, "Success", "Template saved successfully!")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to download template: {e}")
 
     def _on_search(self):
         """Filter products based on search query."""

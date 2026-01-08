@@ -26,6 +26,7 @@ from app.models.base import Base, TimestampMixin, UUIDMixin, GUIDType
 
 if TYPE_CHECKING:
     from app.models.location import Location
+    from app.models.supplier import Supplier
 
 
 class Category(Base, UUIDMixin, TimestampMixin):
@@ -152,6 +153,13 @@ class InventoryItem(Base, UUIDMixin, TimestampMixin):
     has_expiry: Mapped[bool] = mapped_column(Boolean, default=False)
     shelf_life_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
+    # Supplier
+    supplier_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        GUIDType,
+        ForeignKey("suppliers.id"),
+        nullable=True,
+    )
+    
     # Relationships
     category: Mapped[Optional["Category"]] = relationship(
         "Category",
@@ -160,6 +168,10 @@ class InventoryItem(Base, UUIDMixin, TimestampMixin):
     location: Mapped["Location"] = relationship(
         "Location",
         back_populates="inventory_items",
+    )
+    supplier: Mapped[Optional["Supplier"]] = relationship(
+        "Supplier",
+        back_populates="products",
     )
     stock_movements: Mapped[list["StockMovement"]] = relationship(
         "StockMovement",

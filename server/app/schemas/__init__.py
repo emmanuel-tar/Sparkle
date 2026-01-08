@@ -37,6 +37,14 @@ from app.schemas.customer import (
     CustomerUpdate,
     CustomerResponse,
 )
+from app.schemas.purchase_order import (
+    PurchaseOrder,
+    PurchaseOrderCreate,
+    PurchaseOrderUpdate,
+    PurchaseOrderSummary,
+    PurchaseOrderItem,
+    PurchaseOrderItemCreate,
+)
 from app.schemas.common import (
     PaginatedResponse,
     SuccessResponse,
@@ -76,4 +84,11 @@ __all__ = [
     "PaginatedResponse",
     "SuccessResponse",
     "ErrorResponse",
+    # Purchase Order
+    "PurchaseOrder",
+    "PurchaseOrderCreate",
+    "PurchaseOrderUpdate",
+    "PurchaseOrderSummary",
+    "PurchaseOrderItem",
+    "PurchaseOrderItemCreate",
 ]

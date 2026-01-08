@@ -7,11 +7,11 @@ CRUD operations for store locations.
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictException, NotFoundException
+from app.core.exceptions import ConflictException, NotFoundException, ForbiddenException
 from app.models.location import Location
 from app.models.user import UserRole
 from app.schemas.location import LocationCreate, LocationUpdate, LocationResponse
@@ -64,7 +64,7 @@ async def get_location(
     return LocationResponse.model_validate(location)
 
 
-@router.post("", response_model=LocationResponse, status_code=201)
+@router.post("", response_model=LocationResponse, status_code=201, dependencies=[Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))])
 async def create_location(
     request: LocationCreate,
     db: DBSession,
@@ -73,11 +73,6 @@ async def create_location(
     """
     Create a new location (admin only).
     """
-    # Check role
-    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
-        from app.core.exceptions import ForbiddenException
-        raise ForbiddenException("Only admins can create locations")
-    
     # Check if code exists
     result = await db.execute(
         select(Location).where(Location.code == request.code)
@@ -104,7 +99,7 @@ async def create_location(
     return LocationResponse.model_validate(location)
 
 
-@router.patch("/{location_id}", response_model=LocationResponse)
+@router.patch("/{location_id}", response_model=LocationResponse, dependencies=[Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))])
 async def update_location(
     location_id: UUID,
     request: LocationUpdate,
@@ -114,11 +109,6 @@ async def update_location(
     """
     Update a location (admin only).
     """
-    # Check role
-    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
-        from app.core.exceptions import ForbiddenException
-        raise ForbiddenException("Only admins can update locations")
-    
     # Get location
     result = await db.execute(
         select(Location).where(Location.id == location_id)
@@ -146,7 +136,7 @@ async def update_location(
     return LocationResponse.model_validate(location)
 
 
-@router.delete("/{location_id}")
+@router.delete("/{location_id}", dependencies=[Depends(require_role(UserRole.SUPER_ADMIN))])
 async def delete_location(
     location_id: UUID,
     db: DBSession,
@@ -155,10 +145,6 @@ async def delete_location(
     """
     Soft delete a location (super admin only).
     """
-    if current_user.role != UserRole.SUPER_ADMIN:
-        from app.core.exceptions import ForbiddenException
-        raise ForbiddenException("Only super admins can delete locations")
-    
     result = await db.execute(
         select(Location).where(Location.id == location_id)
     )

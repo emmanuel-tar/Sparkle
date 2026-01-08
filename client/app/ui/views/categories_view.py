@@ -97,6 +97,12 @@ class CategoriesView(QWidget):
         self.add_btn.setObjectName("primary")
         self.add_btn.setMinimumHeight(40)
         self.add_btn.clicked.connect(self._on_add)
+        
+        # Permission check
+        if not api_client.has_permission("manage_inventory"):
+            self.add_btn.setEnabled(False)
+            self.add_btn.setToolTip("You do not have permission to manage categories")
+            
         header.addWidget(self.add_btn)
         layout.addLayout(header)
         
@@ -129,6 +135,7 @@ class CategoriesView(QWidget):
             self.table.setItem(i, 2, count_item)
             
             edit_btn = QPushButton("Edit")
+            edit_btn.setEnabled(api_client.has_permission("manage_inventory"))
             edit_btn.clicked.connect(lambda checked, c=cat: self._on_edit(c))
             self.table.setCellWidget(i, 3, edit_btn)
             

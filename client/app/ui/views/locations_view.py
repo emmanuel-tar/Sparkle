@@ -42,6 +42,12 @@ class LocationsView(QWidget):
         self.add_btn.setObjectName("primary")
         self.add_btn.setMinimumHeight(40)
         self.add_btn.clicked.connect(self._on_add_location)
+        
+        is_admin = api_client.user_role in ["super_admin", "admin"]
+        if not is_admin:
+            self.add_btn.setEnabled(False)
+            self.add_btn.setToolTip("Only admins can manage locations")
+            
         header.addWidget(self.add_btn)
         
         layout.addLayout(header)
@@ -101,9 +107,12 @@ class LocationsView(QWidget):
             actions_layout = QHBoxLayout()
             actions_layout.setContentsMargins(2, 2, 2, 2)
             
+            is_admin = api_client.user_role in ["super_admin", "admin"]
+            
             edit_btn = QPushButton("Edit")
             edit_btn.setFixedWidth(50)
             edit_btn.setStyleSheet("font-size: 10px;")
+            edit_btn.setEnabled(is_admin)
             edit_btn.clicked.connect(lambda checked, l=loc: self._on_edit_location(l))
             
             actions_widget = QWidget()

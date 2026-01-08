@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,9 @@ from app.core.exceptions import BadRequestException, NotFoundException
 from app.models.sales import Sale, SaleItem, SaleStatus, PaymentMethod
 from app.models.inventory import InventoryItem, StockMovement, MovementType
 from app.models.customer import Customer
+from app.models.user import UserRole
 from app.schemas.sales import SaleCreate, SaleResponse, SaleItemResponse
-from app.api.deps import CurrentUser, DBSession
+from app.api.deps import CurrentUser, DBSession, require_role, require_permission
 
 router = APIRouter()
 
@@ -43,7 +44,11 @@ async def list_sales(
     limit: int = Query(50, ge=1, le=100),
 ):
     """List sales with filters."""
-    query = select(Sale)
+    from sqlalchemy.orm import selectinload
+    query = select(Sale).options(
+        selectinload(Sale.items),
+        selectinload(Sale.customer)
+    )
     
     # Location filter
     if location_id:
@@ -107,7 +112,7 @@ async def get_sale_by_receipt(
     return SaleResponse.model_validate(sale)
 
 
-@router.post("", response_model=SaleResponse, status_code=201)
+@router.post("", response_model=SaleResponse, status_code=201, dependencies=[Depends(require_permission("manage_sales"))])
 async def create_sale(
     request: SaleCreate,
     db: DBSession,
@@ -269,7 +274,7 @@ async def create_sale(
     return SaleResponse.model_validate(sale)
 
 
-@router.post("/{sale_id}/void", response_model=SaleResponse)
+@router.post("/{sale_id}/void", response_model=SaleResponse, dependencies=[Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))])
 async def void_sale(
     sale_id: UUID,
     db: DBSession,

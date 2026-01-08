@@ -12,18 +12,27 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
+from app.models.base import Base
 
 
 # Create async engine
+engine_args = {
+    "echo": settings.debug,
+}
+
+# Only add pooling arguments for non-sqlite databases
+if not settings.use_sqlite:
+    engine_args.update({
+        "pool_pre_ping": True,
+        "pool_size": 10,
+        "max_overflow": 20,
+    })
+
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    **engine_args
 )
 
 # Session factory
@@ -36,9 +45,7 @@ async_session_factory = async_sessionmaker(
 )
 
 
-class Base(DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
-    pass
+# Base moved to models/base.py
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -83,6 +90,8 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize database tables."""
+    # Ensure all models are imported before calling create_all
+    import app.models  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

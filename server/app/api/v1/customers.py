@@ -8,14 +8,15 @@ import uuid
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException
 from app.models.customer import Customer
+from app.models.user import UserRole
 from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse, LoyaltyPointsAdjustment
-from app.api.deps import CurrentUser, DBSession
+from app.api.deps import CurrentUser, DBSession, require_role, require_permission
 
 router = APIRouter()
 
@@ -114,7 +115,7 @@ async def get_customer_by_loyalty_card(
     return CustomerResponse.model_validate(customer)
 
 
-@router.post("", response_model=CustomerResponse, status_code=201)
+@router.post("", response_model=CustomerResponse, status_code=201, dependencies=[Depends(require_permission("manage_sales"))])
 async def create_customer(
     request: CustomerCreate,
     db: DBSession,
@@ -148,7 +149,7 @@ async def create_customer(
     return CustomerResponse.model_validate(customer)
 
 
-@router.patch("/{customer_id}", response_model=CustomerResponse)
+@router.patch("/{customer_id}", response_model=CustomerResponse, dependencies=[Depends(require_permission("manage_sales"))])
 async def update_customer(
     customer_id: UUID,
     request: CustomerUpdate,
@@ -174,7 +175,7 @@ async def update_customer(
     return CustomerResponse.model_validate(customer)
 
 
-@router.post("/{customer_id}/points", response_model=CustomerResponse)
+@router.post("/{customer_id}/points", response_model=CustomerResponse, dependencies=[Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))])
 async def adjust_loyalty_points(
     customer_id: UUID,
     request: LoyaltyPointsAdjustment,

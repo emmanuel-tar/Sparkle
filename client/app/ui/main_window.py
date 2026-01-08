@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFrame, QStackedWidget, QSpacerItem, QSizePolicy,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QIcon
 
 from app.config import settings
@@ -49,6 +49,35 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.user = user
         self._setup_ui()
+        self._start_polling()
+    
+    def _start_polling(self):
+        """Start background polling for alerts."""
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self._check_alerts)
+        self.poll_timer.start(60000) # Check every minute
+        self._check_alerts() # Initial check
+        
+    def _check_alerts(self):
+        """Check for low stock and update badges."""
+        try:
+            items = api_client.get_low_stock_items(limit=1)
+            count = len(api_client.get_low_stock_items(limit=100)) # Simple count
+            self._update_low_stock_badge(count)
+        except Exception:
+            pass
+            
+    def _update_low_stock_badge(self, count):
+        """Update the sidebar button text with a badge."""
+        for btn in self.nav_buttons:
+            if "Low Stock Alerts" in btn.text():
+                badge = f" ({count})" if count > 0 else ""
+                btn.setText(f"  ⚠️  Low Stock Alerts{badge}")
+                if count > 0:
+                    if "color: #ff6b6b;" not in btn.styleSheet():
+                        btn.setStyleSheet(btn.styleSheet() + "QPushButton { color: #ff6b6b; }")
+                else:
+                    btn.setStyleSheet(btn.styleSheet().replace("QPushButton { color: #ff6b6b; }", ""))
     
     def _setup_ui(self):
         """Setup the main window UI."""
@@ -72,6 +101,14 @@ class MainWindow(QMainWindow):
         # Content area
         content_area = self._create_content_area()
         main_layout.addWidget(content_area, 1)
+        
+        # Initial navigation selection
+        if self.nav_buttons:
+            first_btn = self.nav_buttons[0]
+            first_btn.setChecked(True)
+            # strip icon text if present
+            btn_text = first_btn.text().split("  ")[-1].strip()
+            self._on_nav_click(btn_text)
     
     def _create_sidebar(self) -> QFrame:
         """Create sidebar with navigation."""
@@ -112,6 +149,9 @@ class MainWindow(QMainWindow):
                 ("Customers", "👥"),
                 ("Suppliers", "🏢"),
             ]),
+            ("ALERTS", [
+                ("Low Stock Alerts", "⚠️"),
+            ]),
             ("ADMINISTRATION", [
                 ("Locations", "🏢"),
                 ("Purchase Orders", "📋"),
@@ -127,14 +167,13 @@ class MainWindow(QMainWindow):
             layout.addWidget(group_label)
             
             for text, icon in items:
+                if not self._can_access(text):
+                    continue
+                    
                 btn = SidebarButton(text, icon)
                 btn.clicked.connect(lambda checked, t=text: self._on_nav_click(t))
                 self.nav_buttons.append(btn)
                 layout.addWidget(btn)
-        
-        # Set first button as active
-        if self.nav_buttons:
-            self.nav_buttons[0].setChecked(True)
         
         # Spacer
         layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
@@ -194,6 +233,12 @@ class MainWindow(QMainWindow):
         from app.ui.views.inventory_view import InventoryView
         from app.ui.views.customers_view import CustomersView
         from app.ui.views.sales_history_view import SalesHistoryView
+        from app.ui.views.categories_view import CategoriesView
+        from app.ui.views.locations_view import LocationsView
+        from app.ui.views.stock_audit_view import StockAuditView
+        from app.ui.views.suppliers_view import SuppliersView
+        from app.ui.views.purchase_order_view import PurchaseOrderView
+        from app.ui.views.low_stock_view import LowStockView
         from app.ui.views.placeholder_view import PlaceholderView
         
         # We'll map view names to their stack index
@@ -202,12 +247,14 @@ class MainWindow(QMainWindow):
             "Sales History": 1,
             "Inventory": 2,
             "Categories": 3,
-            "Customers": 4,
-            "Suppliers": 5,
-            "Locations": 6,
-            "Purchase Orders": 7,
-            "Reports": 8,
-            "Settings": 9,
+            "Stock Audit": 4,
+            "Customers": 5,
+            "Suppliers": 6,
+            "Locations": 7,
+            "Purchase Orders": 8,
+            "Low Stock Alerts": 11,
+            "Reports": 9,
+            "Settings": 10,
         }
         
         # Add views in order of mapping
@@ -220,24 +267,30 @@ class MainWindow(QMainWindow):
         self.inventory_view = InventoryView(self.user)
         self.stack.addWidget(self.inventory_view) # Index 2
         
-        from app.ui.views.categories_view import CategoriesView
         self.categories_view = CategoriesView(self.user)
         self.stack.addWidget(self.categories_view) # Index 3
         
+        self.stock_audit_view = StockAuditView(self.user)
+        self.stack.addWidget(self.stock_audit_view) # Index 4
+        
         self.customers_view = CustomersView(self.user)
-        self.stack.addWidget(self.customers_view) # Index 4
+        self.stack.addWidget(self.customers_view) # Index 5
         
-        # Suppliers placeholder
-        self.stack.addWidget(PlaceholderView("Suppliers")) # Index 5
+        self.suppliers_view = SuppliersView(self.user)
+        self.stack.addWidget(self.suppliers_view) # Index 6
         
-        from app.ui.views.locations_view import LocationsView
         self.locations_view = LocationsView(self.user)
-        self.stack.addWidget(self.locations_view) # Index 6
+        self.stack.addWidget(self.locations_view) # Index 7
+        
+        self.purchase_order_view = PurchaseOrderView(self.user)
+        self.stack.addWidget(self.purchase_order_view) # Index 8
+        
+        self.low_stock_view = LowStockView(self.user)
+        self.stack.addWidget(self.low_stock_view) # Index 11
         
         # Remaining placeholders
-        self.stack.addWidget(PlaceholderView("Purchase Orders")) # Index 7
-        self.stack.addWidget(PlaceholderView("Reports")) # Index 8
-        self.stack.addWidget(PlaceholderView("Settings")) # Index 9
+        self.stack.addWidget(PlaceholderView("Reports")) # Index 9
+        self.stack.addWidget(PlaceholderView("Settings")) # Index 10
         
         layout.addWidget(self.stack, 1)
         
@@ -266,6 +319,41 @@ class MainWindow(QMainWindow):
         
         return bar
     
+    def _can_access(self, view_name: str) -> bool:
+        """Check if user has permission to access a specific view."""
+        if api_client.user_role == "super_admin":
+            return True
+            
+        permission_map = {
+            "POS": "manage_sales",
+            "Sales History": ["manage_sales", "view_reports"],
+            "Inventory": "manage_inventory",
+            "Categories": "manage_inventory",
+            "Stock Audit": "view_reports", # Added Stock Audit permission
+            "Customers": "manage_sales",
+            "Suppliers": "manage_inventory",
+            "Purchase Orders": "manage_inventory",
+            "Reports": "view_reports",
+        }
+        
+        role_map = {
+            "Locations": ["super_admin", "admin"],
+            "Settings": ["super_admin", "admin"],
+        }
+        
+        # Check by role
+        if view_name in role_map:
+            return api_client.user_role in role_map[view_name]
+            
+        # Check by permission
+        if view_name in permission_map:
+            perms = permission_map[view_name]
+            if isinstance(perms, list):
+                return any(api_client.has_permission(p) for p in perms)
+            return api_client.has_permission(perms)
+            
+        return True # Default to allow if not explicitly restricted
+
     def _on_nav_click(self, view_name: str):
         """Handle navigation button click."""
         # Update button states

@@ -48,6 +48,7 @@ class InventoryItemCreate(BaseModel):
     description: Optional[str] = None
     category_id: Optional[UUID] = None
     location_id: UUID
+    supplier_id: Optional[UUID] = None
     
     # Stock
     current_stock: float = 0
@@ -83,6 +84,7 @@ class InventoryItemUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
     category_id: Optional[UUID] = None
+    supplier_id: Optional[UUID] = None
     
     min_stock_level: Optional[float] = None
     max_stock_level: Optional[float] = None
@@ -118,6 +120,7 @@ class InventoryItemResponse(BaseModel):
     description: Optional[str]
     category_id: Optional[UUID]
     location_id: UUID
+    supplier_id: Optional[UUID] = None
     
     current_stock: float
     reserved_stock: float
@@ -134,6 +137,7 @@ class InventoryItemResponse(BaseModel):
     
     # Extra Info
     location_name: Optional[str] = None
+    supplier_name: Optional[str] = None
     
     # Financials
     margin: float = 0
@@ -175,3 +179,10 @@ class StockMovementResponse(BaseModel):
     notes: Optional[str]
     batch_number: Optional[str]
     created_at: datetime
+
+
+class StockMovementDetailResponse(StockMovementResponse):
+    """Detailed stock movement with item info."""
+    
+    item_name: Optional[str] = None
+    item_sku: Optional[str] = None

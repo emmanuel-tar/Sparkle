@@ -99,6 +99,7 @@ class UserResponse(BaseModel):
     location_id: Optional[UUID]
     is_active: bool
     is_verified: bool
+    permissions: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
     

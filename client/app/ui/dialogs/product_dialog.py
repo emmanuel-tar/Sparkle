@@ -72,8 +72,11 @@ class ProductDialog(QDialog):
         
         self.category_combo = QComboBox()
         self.category_combo.addItem("Select Category", None)
-        # Load categories (will be populated in _load_categories)
         form_layout.addRow("Category:", self.category_combo)
+        
+        self.supplier_combo = QComboBox()
+        self.supplier_combo.addItem("Select Supplier", None)
+        form_layout.addRow("Supplier:", self.supplier_combo)
         
         layout.addWidget(form_frame)
         
@@ -165,8 +168,9 @@ class ProductDialog(QDialog):
         
         layout.addLayout(btns)
         
-        # Load categories
+        # Load categories and suppliers
         self._load_categories()
+        self._load_suppliers()
         
     def _load_categories(self):
         """Fetch categories from API."""
@@ -183,6 +187,22 @@ class ProductDialog(QDialog):
                         self.category_combo.setCurrentIndex(index)
         except Exception as e:
             print(f"Error loading categories for dialog: {e}")
+
+    def _load_suppliers(self):
+        """Fetch suppliers from API."""
+        try:
+            suppliers = api_client.get_suppliers()
+            if suppliers and isinstance(suppliers, list):
+                for sup in suppliers:
+                    self.supplier_combo.addItem(sup.get("name"), sup.get("id"))
+                
+                # Set current supplier if editing
+                if self.is_edit and self.product_data.get("supplier_id"):
+                    index = self.supplier_combo.findData(self.product_data.get("supplier_id"))
+                    if index >= 0:
+                        self.supplier_combo.setCurrentIndex(index)
+        except Exception as e:
+            print(f"Error loading suppliers for dialog: {e}")
             
         # Initial financial update
         self._update_financials()
@@ -230,6 +250,7 @@ class ProductDialog(QDialog):
             "barcode": self.barcode_input.text().strip() or None,
             "description": self.description_input.toPlainText().strip() or None,
             "category_id": self.category_combo.currentData(),
+            "supplier_id": self.supplier_combo.currentData(),
             "selling_price": price,
             "cost_price": self.cost_price.value(),
             "unit": self.unit_input.text().strip(),

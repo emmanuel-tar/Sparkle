@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.sales import PaymentMethod, SaleStatus
+from app.schemas.customer import CustomerResponse
 
 
 class SaleItemCreate(BaseModel):
@@ -76,6 +77,7 @@ class SaleResponse(BaseModel):
     location_id: UUID
     terminal_id: Optional[str]
     customer_id: Optional[UUID]
+    customer: Optional[CustomerResponse] = None
     cashier_id: UUID
     
     subtotal: float
@@ -95,7 +97,8 @@ class SaleResponse(BaseModel):
     points_earned: int
     points_redeemed: int
     
-    items: List[SaleItemResponse]
+    items: List[SaleItemResponse] = []
+    items_snapshot: Optional[List[dict]] = None
     
     created_at: datetime
 

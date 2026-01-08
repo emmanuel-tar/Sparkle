@@ -35,6 +35,8 @@ class APIClient:
         self.timeout = settings.REQUEST_TIMEOUT
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
+        self._user_role: Optional[str] = None
+        self._user_permissions: Dict[str, bool] = {}
         self._client: Optional[httpx.Client] = None
         
         # Load saved tokens
@@ -68,6 +70,8 @@ class APIClient:
                 data = json.loads(settings.TOKEN_FILE.read_text())
                 self._access_token = data.get("access_token")
                 self._refresh_token = data.get("refresh_token")
+                self._user_role = data.get("user_role")
+                self._user_permissions = data.get("user_permissions", {})
             except Exception:
                 pass
     
@@ -77,6 +81,8 @@ class APIClient:
             data = {
                 "access_token": self._access_token,
                 "refresh_token": self._refresh_token,
+                "user_role": self._user_role,
+                "user_permissions": self._user_permissions,
             }
             settings.TOKEN_FILE.write_text(json.dumps(data))
         except Exception:
@@ -86,13 +92,19 @@ class APIClient:
         """Clear saved tokens."""
         self._access_token = None
         self._refresh_token = None
+        self._user_role = None
+        self._user_permissions = {}
         if settings.TOKEN_FILE.exists():
             settings.TOKEN_FILE.unlink()
     
-    def set_tokens(self, access_token: str, refresh_token: str) -> None:
-        """Set authentication tokens."""
+    def set_tokens(self, access_token: str, refresh_token: str, user_role: Optional[str] = None, permissions: Optional[Dict] = None) -> None:
+        """Set authentication tokens and user info."""
         self._access_token = access_token
         self._refresh_token = refresh_token
+        if user_role:
+            self._user_role = user_role
+        if permissions:
+            self._user_permissions = permissions
         self._save_tokens()
         
         # Update client headers
@@ -103,6 +115,30 @@ class APIClient:
     def is_authenticated(self) -> bool:
         """Check if client has tokens."""
         return self._access_token is not None
+        
+    @property
+    def user_role(self) -> Optional[str]:
+        """Get current user role."""
+        return self._user_role
+
+    def has_permission(self, permission: str) -> bool:
+        """Check if user has a permission."""
+        if self._user_role == "super_admin":
+            return True
+        
+        # Check custom permissions
+        if permission in self._user_permissions:
+            return self._user_permissions[permission]
+            
+        # Default role-based permissions (simplified client-side mirror)
+        role_permissions = {
+            "admin": ["manage_users", "view_reports", "manage_inventory", "manage_sales"],
+            "manager": ["view_reports", "manage_inventory", "manage_sales"],
+            "cashier": ["manage_sales"],
+            "inventory": ["manage_inventory"],
+            "viewer": ["view_reports"],
+        }
+        return permission in role_permissions.get(self._user_role, [])
     
     def _handle_response(self, response: httpx.Response) -> Dict[str, Any]:
         """Handle API response."""
@@ -202,6 +238,28 @@ class APIClient:
         """DELETE request."""
         return self.request("DELETE", endpoint)
     
+    def download_file(self, endpoint: str) -> bytes:
+        """GET request for binary file download."""
+        self.client.headers.update(self._get_headers())
+        response = self.client.get(endpoint.lstrip("/"))
+        if response.status_code == 200:
+            return response.content
+        raise APIError(f"Failed to download file: {response.text}", response.status_code)
+
+    def upload_file(self, endpoint: str, file_path: str) -> Dict[str, Any]:
+        """POST request with file upload."""
+        headers = self._get_headers()
+        del headers["Content-Type"] # httpx will set this for multipart
+        
+        with open(file_path, "rb") as f:
+            files = {"file": (Path(file_path).name, f, "text/csv")}
+            response = self.client.post(
+                endpoint.lstrip("/"),
+                headers=headers,
+                files=files
+            )
+            return self._handle_response(response)
+    
     # ============== Auth Methods ==============
     
     def login(self, username: str, password: str) -> Dict[str, Any]:
@@ -223,8 +281,13 @@ class APIClient:
         self._clear_tokens()
     
     def get_current_user(self) -> Dict[str, Any]:
-        """Get current user info."""
-        return self.get("/auth/me")
+        """Get current user info and sync local state."""
+        user = self.get("/auth/me")
+        if user:
+            self._user_role = user.get("role")
+            self._user_permissions = user.get("permissions") or {}
+            self._save_tokens()
+        return user
     
     # ============== Inventory Methods ==============
     
@@ -246,6 +309,10 @@ class APIClient:
             params["search"] = search
         return self.get("/inventory/items", params)
     
+    def get_low_stock_items(self, skip: int = 0, limit: int = 100) -> list:
+        """Get items that are at or below reorder point."""
+        return self.get("/inventory/items", {"is_low_stock": True, "skip": skip, "limit": limit})
+    
     def get_item_by_barcode(self, barcode: str) -> Dict[str, Any]:
         """Get item by barcode."""
         return self.get(f"/inventory/items/barcode/{barcode}")
@@ -257,6 +324,81 @@ class APIClient:
     def get_item_movements(self, item_id: str) -> list:
         """Get stock movement history for an item."""
         return self.get(f"/inventory/items/{item_id}/movements")
+    
+    def export_inventory(self, location_id: Optional[str] = None) -> bytes:
+        """Export inventory CSV."""
+        params = {}
+        if location_id:
+            params["location_id"] = location_id
+        return self.download_file("/inventory/export")
+
+    def get_import_template(self) -> bytes:
+        """Download import template CSV."""
+        return self.download_file("/inventory/import-template")
+
+    def import_inventory(self, file_path: str) -> Dict[str, Any]:
+        """Import inventory from CSV."""
+        return self.upload_file("/inventory/import", file_path)
+
+    def get_all_movements(self, skip: int = 0, limit: int = 50) -> list:
+        """Get global stock movement audit log."""
+        return self.get("/inventory/movements", {"skip": skip, "limit": limit})
+    
+    # ============== Supplier Methods ==============
+    
+    def get_suppliers(self, is_active: bool = True, search: Optional[str] = None) -> list:
+        """Get all suppliers."""
+        params = {"is_active": is_active}
+        if search:
+            params["search"] = search
+        return self.get("/suppliers", params)
+    
+    def get_supplier(self, supplier_id: str) -> dict:
+        """Get a single supplier."""
+        return self.get(f"/suppliers/{supplier_id}")
+    
+    def create_supplier(self, supplier_data: dict) -> dict:
+        """Create a new supplier."""
+        return self.post("/suppliers", supplier_data)
+    
+    def update_supplier(self, supplier_id: str, supplier_data: dict) -> dict:
+        """Update a supplier."""
+        return self.patch(f"/suppliers/{supplier_id}", supplier_data)
+    
+    def delete_supplier(self, supplier_id: str) -> dict:
+        """Deactivate a supplier (soft delete)."""
+        return self.delete(f"/suppliers/{supplier_id}")
+    
+    # ============== Purchase Order Methods ==============
+    
+    def get_purchase_orders(self, supplier_id: Optional[str] = None, status: Optional[str] = None) -> list:
+        """Get purchase orders."""
+        params = {}
+        if supplier_id:
+            params["supplier_id"] = supplier_id
+        if status:
+            params["status"] = status
+        return self.get("/purchase-orders", params)
+    
+    def get_purchase_order(self, po_id: str) -> dict:
+        """Get a single purchase order."""
+        return self.get(f"/purchase-orders/{po_id}")
+    
+    def create_purchase_order(self, po_data: dict) -> dict:
+        """Create a new purchase order."""
+        return self.post("/purchase-orders", po_data)
+    
+    def update_purchase_order(self, po_id: str, po_data: dict) -> dict:
+        """Update a purchase order (status, notes, etc)."""
+        return self.patch(f"/purchase-orders/{po_id}", po_data)
+    
+    def delete_purchase_order(self, po_id: str) -> dict:
+        """Delete a purchase order."""
+        return self.delete(f"/purchase-orders/{po_id}")
+    
+    def get_suggested_po_items(self, supplier_id: str) -> list:
+        """Get suggested items to order for a supplier."""
+        return self.get(f"/purchase-orders/suggest/{supplier_id}")
     
     # ============== Sales Methods ==============
     

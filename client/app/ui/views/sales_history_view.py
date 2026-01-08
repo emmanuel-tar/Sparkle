@@ -77,9 +77,9 @@ class SalesHistoryView(QWidget):
         
         # Sales Table
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "Date", "Receipt #", "Customer", "Items", "Total", "Payment", "Status"
+            "Date", "Receipt #", "Customer", "Items", "Total", "Payment", "Status", "Actions"
         ])
         
         header = self.table.horizontalHeader()
@@ -90,6 +90,7 @@ class SalesHistoryView(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
         
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
@@ -153,9 +154,61 @@ class SalesHistoryView(QWidget):
                 status_item.setForeground(Qt.red)
             elif status == "Completed":
                 status_item.setForeground(Qt.green)
+            status_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(i, 6, status_item)
             
+            # Actions
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(4, 2, 4, 2)
+            actions_layout.setSpacing(6)
+            
+            is_admin = api_client.user_role in ["super_admin", "admin"]
+            is_voided = sale.get("status") == "void"
+            
+            void_btn = QPushButton("Void")
+            void_btn.setFixedSize(60, 24)
+            void_btn.setCursor(Qt.PointingHandCursor)
+            void_btn.setEnabled(is_admin and not is_voided)
+            void_btn.setStyleSheet("""
+                QPushButton {
+                    background: #fff5f5;
+                    border: 1px solid #ffc9c9;
+                    border-radius: 4px;
+                    color: #fa5252;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background: #ffe3e3;
+                }
+                QPushButton:disabled {
+                    background: #f1f3f5;
+                    border: 1px solid #e9ecef;
+                    color: #adb5bd;
+                }
+            """)
+            void_btn.clicked.connect(lambda _, s=sale: self._on_void_sale(s))
+            actions_layout.addWidget(void_btn)
+            actions_layout.addStretch()
+            self.table.setCellWidget(i, 7, actions_widget)
+            
         self.stats_label.setText(f"Showing {len(sales)} transactions")
+
+    def _on_void_sale(self, sale):
+        """Void a sale with confirmation."""
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Confirm Void",
+            f"Are you sure you want to void receipt {sale['receipt_number']}?\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                api_client.post(f"/sales/{sale['id']}/void")
+                self._load_data()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to void sale: {e}")
 
     def _on_search(self):
         """Handle search."""

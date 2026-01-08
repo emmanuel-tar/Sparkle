@@ -34,3 +34,21 @@
 - **API Optimization**: Server-side joins for location and category data in inventory response.
 - Basic functional POS View with cart management and customer lookup.
 - Fixed navigation mapping to correctly switch between all dashboard views.
+
+## [2026-01-08-B] - Security & Inventory Enhancements
+
+### Added
+
+- **RBAC Security**: Full Role-Based Access Control implemented across backend and frontend.
+  - Secured 15+ API endpoints with `require_permission` and `require_role`.
+  - Dynamic UI adaptation: Sidebar and action buttons (Edit, Delete, Void) automatically hide/disable based on authorized permissions.
+  - Role-specific dashboard visibility (e.g., Cashiers only see POS/Sales).
+- **Inventory Import/Export (In Progress)**:
+  - Backend endpoints for bulk inventory CSV export and import.
+  - Standardized CSV template for data consistency.
+- **Enhanced Stock Movement**: Added detailed audit trails for every inventory adjustment.
+
+### Fixed
+
+- Fixed SQLite engine configuration issue in `database.py` that prevented server startup when pooling arguments were passed to SQLite.
+- Fixed `MainWindow` initialization order to ensure correct default view selection based on user permissions.
