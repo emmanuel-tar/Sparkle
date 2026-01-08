@@ -98,6 +98,23 @@ class ProductDialog(QDialog):
             self.selling_price.setValue(self.product_data.get("selling_price", 0))
         pricing_layout.addRow("Selling Price *:", self.selling_price)
         
+        # Financial Indicators
+        self.margin_label = QLabel("Margin: ₦ 0.00")
+        self.margin_label.setStyleSheet("font-weight: bold; color: #888888;")
+        pricing_layout.addRow(self.margin_label)
+        
+        self.margin_pct_label = QLabel("Margin %: 0.00%")
+        self.margin_pct_label.setStyleSheet("font-size: 11px; color: #888888;")
+        pricing_layout.addRow(self.margin_pct_label)
+        
+        self.markup_pct_label = QLabel("Markup %: 0.00%")
+        self.markup_pct_label.setStyleSheet("font-size: 11px; color: #888888;")
+        pricing_layout.addRow(self.markup_pct_label)
+        
+        # Connect signals for real-time calculation
+        self.cost_price.valueChanged.connect(self._update_financials)
+        self.selling_price.valueChanged.connect(self._update_financials)
+        
         self.unit_input = QLineEdit()
         self.unit_input.setPlaceholderText("e.g. pcs, kg, box")
         self.unit_input.setText("pcs")
@@ -166,6 +183,34 @@ class ProductDialog(QDialog):
                         self.category_combo.setCurrentIndex(index)
         except Exception as e:
             print(f"Error loading categories for dialog: {e}")
+            
+        # Initial financial update
+        self._update_financials()
+
+    def _update_financials(self):
+        """Calculate and update margin/markup labels."""
+        cost = self.cost_price.value()
+        selling = self.selling_price.value()
+        
+        margin_ngn = selling - cost
+        margin_pct = (margin_ngn / selling * 100) if selling > 0 else 0
+        markup_pct = (margin_ngn / cost * 100) if cost > 0 else 0
+        
+        self.margin_label.setText(f"Margin: ₦ {margin_ngn:,.2f}")
+        self.margin_pct_label.setText(f"Margin %: {margin_pct:.2f}%")
+        self.markup_pct_label.setText(f"Markup %: {markup_pct:.2f}%")
+        
+        # Color coding
+        if margin_ngn < 0:
+            color = "#ff6b6b" # Red
+        elif margin_pct < 15:
+            color = "#ffa502" # Orange/Yellow
+        else:
+            color = "#2ed573" # Green
+            
+        self.margin_label.setStyleSheet(f"font-weight: bold; color: {color};")
+        self.margin_pct_label.setStyleSheet(f"font-size: 11px; color: {color};")
+        self.markup_pct_label.setStyleSheet(f"font-size: 11px; color: {color};")
 
     def _on_save(self):
         """Validate and save product data."""
@@ -204,16 +249,21 @@ class ProductDialog(QDialog):
             if self.is_edit:
                 api_client.patch(f"inventory/items/{self.product_data['id']}", data)
             else:
-                # Add location_id if missing (placeholder for now)
-                # In a real app, this would be the user's assigned location
-                from app.api import api_client
+                # Add location_id if missing 
                 user = api_client.get_current_user()
-                data["location_id"] = user.get("location_id")
+                loc_id = user.get("location_id")
                 
-                if not data["location_id"]:
-                    # Fallback or error
-                    pass
+                if not loc_id:
+                    # Try to fetch locations and use the first one as fallback if user has none
+                    locations = api_client.get_locations()
+                    if locations:
+                        loc_id = locations[0]["id"]
+                
+                if not loc_id:
+                    QMessageBox.warning(self, "Location Error", "No active location found. Please set up a location first.")
+                    return
                     
+                data["location_id"] = str(loc_id)
                 api_client.post("inventory/items", data)
                 
             self.accept()

@@ -231,6 +231,7 @@ class APIClient:
     def get_items(
         self,
         location_id: Optional[str] = None,
+        category_id: Optional[str] = None,
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
@@ -239,6 +240,8 @@ class APIClient:
         params = {"skip": skip, "limit": limit}
         if location_id:
             params["location_id"] = location_id
+        if category_id:
+            params["category_id"] = category_id
         if search:
             params["search"] = search
         return self.get("/inventory/items", params)
@@ -246,6 +249,14 @@ class APIClient:
     def get_item_by_barcode(self, barcode: str) -> Dict[str, Any]:
         """Get item by barcode."""
         return self.get(f"/inventory/items/barcode/{barcode}")
+    
+    def delete_item(self, item_id: str) -> Dict[str, Any]:
+        """Delete an inventory item."""
+        return self.delete(f"/inventory/items/{item_id}")
+    
+    def get_item_movements(self, item_id: str) -> list:
+        """Get stock movement history for an item."""
+        return self.get(f"/inventory/items/{item_id}/movements")
     
     # ============== Sales Methods ==============
     
@@ -269,11 +280,32 @@ class APIClient:
     
     def search_customers(self, search: str) -> list:
         """Search customers."""
-        return self.get("/customers", {"search": search})
+        return self.get("/customers/search", {"search": search})
     
     def get_customer_by_phone(self, phone: str) -> Dict[str, Any]:
         """Get customer by phone."""
         return self.get(f"/customers/phone/{phone}")
+    
+    # ============== Location Methods ==============
+    
+    def get_locations(self, is_active: Optional[bool] = None) -> list:
+        """Get all locations."""
+        params = {}
+        if is_active is not None:
+            params["is_active"] = is_active
+        return self.get("/locations", params)
+    
+    def create_location(self, data: Dict) -> Dict[str, Any]:
+        """Create a new location."""
+        return self.post("/locations", data)
+    
+    def update_location(self, location_id: str, data: Dict) -> Dict[str, Any]:
+        """Update a location."""
+        return self.patch(f"/locations/{location_id}", data)
+    
+    def delete_location(self, location_id: str) -> Dict[str, Any]:
+        """Delete a location."""
+        return self.delete(f"/locations/{location_id}")
     
     def close(self) -> None:
         """Close the HTTP client."""

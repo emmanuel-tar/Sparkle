@@ -106,7 +106,7 @@ class CustomersView(QWidget):
     def _load_data(self):
         """Load customer data from API."""
         try:
-            response = api_client.get("/customers/search") # The endpoint exists but might return empty
+            response = api_client.get("/customers")
             if response and isinstance(response, list):
                 self.customers = response
                 self._update_table(self.customers)

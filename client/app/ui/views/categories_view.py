@@ -101,11 +101,12 @@ class CategoriesView(QWidget):
         layout.addLayout(header)
         
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Name", "Description", "Actions"])
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Name", "Description", "Products", "Actions"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         layout.addWidget(self.table)
         
     def _load_data(self):
@@ -122,9 +123,14 @@ class CategoriesView(QWidget):
             self.table.setItem(i, 0, QTableWidgetItem(cat.get("name", "")))
             self.table.setItem(i, 1, QTableWidgetItem(cat.get("description", "")))
             
+            # Product Count
+            count_item = QTableWidgetItem(str(cat.get("product_count", 0)))
+            count_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 2, count_item)
+            
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked, c=cat: self._on_edit(c))
-            self.table.setCellWidget(i, 2, edit_btn)
+            self.table.setCellWidget(i, 3, edit_btn)
             
     def _on_add(self):
         if CategoryDialog(self).exec():

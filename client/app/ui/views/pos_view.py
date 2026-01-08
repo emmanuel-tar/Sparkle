@@ -99,6 +99,9 @@ class POSView(QWidget):
             "SKU", "Product", "Price", "Qty", "Total", "Action"
         ])
         
+        # Increase row height for better touch/click friendliness
+        self.cart_table.verticalHeader().setDefaultSectionSize(40)
+        
         header = self.cart_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -119,6 +122,12 @@ class POSView(QWidget):
         clear_btn.setObjectName("danger")
         clear_btn.clicked.connect(self._clear_cart)
         actions_layout.addWidget(clear_btn)
+        
+        actions_layout.addStretch()
+        
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #2ed573; font-weight: bold;")
+        actions_layout.addWidget(self.status_label)
         
         actions_layout.addStretch()
         
@@ -263,14 +272,19 @@ class POSView(QWidget):
             if items:
                 if len(items) == 1:
                     self._add_to_cart(items[0])
+                    self.status_label.setText(f"✓ Added {items[0]['name']}")
                     self.search_input.clear()
                 else:
-                    # TODO: Show product picker dialog
+                    # For now just add the first one if multiple found
                     self._add_to_cart(items[0])
+                    self.status_label.setText(f"✓ Added {items[0]['name']} (Multiple matches)")
                     self.search_input.clear()
             else:
+                self.status_label.setText(f"✗ Not found: {query}")
+                self.status_label.setStyleSheet("color: #ff6b6b; font-weight: bold;")
                 QMessageBox.warning(self, "Not Found", f"No product found for '{query}'")
         except APIError as e:
+            self.status_label.setText("✗ Error")
             QMessageBox.warning(self, "Error", e.message)
     
     def _add_to_cart(self, item_data: dict):
@@ -294,13 +308,21 @@ class POSView(QWidget):
         for row, item in enumerate(self.cart):
             self.cart_table.setItem(row, 0, QTableWidgetItem(item.sku))
             self.cart_table.setItem(row, 1, QTableWidgetItem(item.name))
-            self.cart_table.setItem(row, 2, QTableWidgetItem(f"{settings.CURRENCY_SYMBOL}{item.unit_price:.2f}"))
+            # Unit Price override
+            price_spin = QDoubleSpinBox()
+            price_spin.setRange(0, 10000000)
+            price_spin.setPrefix(f"{settings.CURRENCY_SYMBOL}")
+            price_spin.setValue(item.unit_price)
+            price_spin.setStyleSheet("background: transparent; border: 1px solid #444; border-radius: 4px;")
+            price_spin.valueChanged.connect(lambda v, i=row: self._update_price(i, v))
+            self.cart_table.setCellWidget(row, 2, price_spin)
             
             # Quantity spinner
             qty_spin = QSpinBox()
             qty_spin.setMinimum(1)
             qty_spin.setMaximum(999)
             qty_spin.setValue(int(item.quantity))
+            qty_spin.setStyleSheet("background: transparent; border: 1px solid #444; border-radius: 4px;")
             qty_spin.valueChanged.connect(lambda v, i=row: self._update_quantity(i, v))
             self.cart_table.setCellWidget(row, 3, qty_spin)
             
@@ -319,7 +341,14 @@ class POSView(QWidget):
         """Update item quantity."""
         if 0 <= row < len(self.cart):
             self.cart[row].quantity = quantity
-            self._refresh_cart_table()
+            self._update_totals() # Faster than full refresh
+
+    def _update_price(self, row: int, price: float):
+        """Update item price override."""
+        if 0 <= row < len(self.cart):
+            self.cart[row].unit_price = price
+            self.cart_table.setItem(row, 4, QTableWidgetItem(f"{settings.CURRENCY_SYMBOL}{self.cart[row].total:.2f}"))
+            self._update_totals()
     
     def _remove_item(self, row: int):
         """Remove item from cart."""

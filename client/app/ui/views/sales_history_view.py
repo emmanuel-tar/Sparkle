@@ -105,7 +105,7 @@ class SalesHistoryView(QWidget):
     def _load_data(self):
         """Load sales data from API."""
         try:
-            response = api_client.get("/sales/")
+            response = api_client.get("/sales")
             if response and isinstance(response, list):
                 self.sales = response
                 self._update_table(self.sales)

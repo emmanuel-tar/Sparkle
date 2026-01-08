@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
                 ("Suppliers", "🏢"),
             ]),
             ("ADMINISTRATION", [
+                ("Locations", "🏢"),
                 ("Purchase Orders", "📋"),
                 ("Reports", "📈"),
                 ("Settings", "⚙️"),
@@ -203,9 +204,10 @@ class MainWindow(QMainWindow):
             "Categories": 3,
             "Customers": 4,
             "Suppliers": 5,
-            "Purchase Orders": 6,
-            "Reports": 7,
-            "Settings": 8,
+            "Locations": 6,
+            "Purchase Orders": 7,
+            "Reports": 8,
+            "Settings": 9,
         }
         
         # Add views in order of mapping
@@ -225,11 +227,17 @@ class MainWindow(QMainWindow):
         self.customers_view = CustomersView(self.user)
         self.stack.addWidget(self.customers_view) # Index 4
         
-        # Remaining placeholders
+        # Suppliers placeholder
         self.stack.addWidget(PlaceholderView("Suppliers")) # Index 5
-        self.stack.addWidget(PlaceholderView("Purchase Orders")) # Index 6
-        self.stack.addWidget(PlaceholderView("Reports")) # Index 7
-        self.stack.addWidget(PlaceholderView("Settings")) # Index 8
+        
+        from app.ui.views.locations_view import LocationsView
+        self.locations_view = LocationsView(self.user)
+        self.stack.addWidget(self.locations_view) # Index 6
+        
+        # Remaining placeholders
+        self.stack.addWidget(PlaceholderView("Purchase Orders")) # Index 7
+        self.stack.addWidget(PlaceholderView("Reports")) # Index 8
+        self.stack.addWidget(PlaceholderView("Settings")) # Index 9
         
         layout.addWidget(self.stack, 1)
         

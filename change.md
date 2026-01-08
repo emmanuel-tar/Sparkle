@@ -26,10 +26,11 @@
 ### Client Progress
 
 - Functional Login Window with server connection settings.
-- **Full Inventory Lifecycle**: Users can now Add, Edit, and Adjust stock levels via dedicated modal dialogs.
-- **Stock Movements**: Integrated "Stock Adjust" functionality with support for multiple movement types (Adjustment, Damage, Return, etc.).
-- **Category Management**: New Categories view for organizing the product catalog with parent-child relationship support.
-- **Data Integrity**: Seeded default warehouse location for first-time use.
-- **API Stability**: Improved `APIClient` path resolution for consistent server communication.
+- **Financial Intelligence**: Real-time Margin and Markup calculations in both Product Dialog and Inventory List.
+- **Location Management**: Full CRUD for physical stores and warehouses via the new Locations view.
+- **Advanced Inventory Dashboard**: New columns for Location tracking and Profitability metrics (Margin %).
+- **Enhanced Categorization**: Categories now show real-time product counts, supported by optimized server-side queries.
+- **Dynamic Filtering**: Integrated backend-driven filtering for Locations, Categories, and Stock Status.
+- **API Optimization**: Server-side joins for location and category data in inventory response.
 - Basic functional POS View with cart management and customer lookup.
 - Fixed navigation mapping to correctly switch between all dashboard views.

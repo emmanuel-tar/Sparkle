@@ -35,6 +35,7 @@ class CategoryResponse(BaseModel):
     icon: Optional[str]
     color: Optional[str]
     is_active: bool
+    product_count: int = 0
     created_at: datetime
 
 
@@ -130,6 +131,14 @@ class InventoryItemResponse(BaseModel):
     
     unit: str
     image_url: Optional[str]
+    
+    # Extra Info
+    location_name: Optional[str] = None
+    
+    # Financials
+    margin: float = 0
+    margin_pct: float = 0
+    markup_pct: float = 0
     
     is_active: bool
     is_taxable: bool

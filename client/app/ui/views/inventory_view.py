@@ -15,6 +15,7 @@ from PySide6.QtGui import QFont, QIcon
 from app.api import api_client
 from app.ui.dialogs.product_dialog import ProductDialog
 from app.ui.dialogs.stock_dialog import StockDialog
+from app.ui.dialogs.history_dialog import HistoryDialog
 
 
 class InventoryView(QWidget):
@@ -75,32 +76,40 @@ class InventoryView(QWidget):
         filter_bar.addWidget(self.search_input, 3)
         
         self.category_filter = QComboBox()
-        self.category_filter.addItem("All Categories")
+        self.category_filter.addItem("All Categories", None)
         self.category_filter.setMinimumHeight(35)
+        self.category_filter.currentIndexChanged.connect(self._load_data)
         filter_bar.addWidget(self.category_filter, 1)
+        
+        self.location_filter = QComboBox()
+        self.location_filter.addItem("All Locations", None)
+        self.location_filter.setMinimumHeight(35)
+        self.location_filter.currentIndexChanged.connect(self._load_data)
+        filter_bar.addWidget(self.location_filter, 1)
         
         self.stock_filter = QComboBox()
         self.stock_filter.addItems(["All Stock", "In Stock", "Low Stock", "Out of Stock"])
         self.stock_filter.setMinimumHeight(35)
+        self.stock_filter.currentIndexChanged.connect(self._on_stock_filter_change)
         filter_bar.addWidget(self.stock_filter, 1)
         
         layout.addLayout(filter_bar)
         
         # Inventory Table
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels([
-            "SKU", "Product Name", "Category", "Stock Level", "Unit", "Price", "Actions"
+            "SKU", "Product Name", "Location", "Category", "Stock", "Unit", "Price", "Margin %", "Actions"
         ])
         
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        for i in range(2, 9):
+            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        
+        # Make Margin % more prominent
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
         
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
@@ -118,90 +127,159 @@ class InventoryView(QWidget):
         layout.addLayout(footer)
 
     def _load_data(self):
-        """Load inventory data from the API."""
+        """Load inventory data from the API with filtering."""
         try:
-            # Note: For now, we'll fetch all items. Pagination can be added later.
-            response = api_client.get("/inventory/items")
-            if response and isinstance(response, list):
-                self.products = response
-                self._update_table(self.products)
-            else:
-                self.products = []
-                self._update_table([])
+            cat_id = self.category_filter.currentData()
+            loc_id = self.location_filter.currentData()
+            search = self.search_input.text().strip()
+            
+            # Fetch from API with filters
+            items = api_client.get_items(
+                location_id=loc_id,
+                category_id=cat_id,
+                search=search if len(search) >= 2 else None
+            )
+            
+            self.products = items
+            self._apply_stock_filter() # Local filtering for stock level
+            
         except Exception as e:
             print(f"Error loading products: {e}")
             self.stats_label.setText("Error loading products")
 
     def _load_categories(self):
-        """Fetch categories for filtering."""
+        """Fetch categories and locations for filtering."""
         try:
-            response = api_client.get("inventory/categories")
-            if response and isinstance(response, list):
-                self.categories = response
+            # Load Categories
+            categories = api_client.get("inventory/categories")
+            if categories and isinstance(categories, list):
+                self.category_filter.blockSignals(True)
                 self.category_filter.clear()
                 self.category_filter.addItem("All Categories", None)
-                for cat in self.categories:
+                for cat in categories:
                     self.category_filter.addItem(cat.get("name"), cat.get("id"))
+                self.category_filter.blockSignals(False)
+            
+            # Load Locations
+            locations = api_client.get_locations()
+            if locations:
+                self.location_filter.blockSignals(True)
+                self.location_filter.clear()
+                self.location_filter.addItem("All Locations", None)
+                for loc in locations:
+                    self.location_filter.addItem(loc.get("name"), loc.get("id"))
+                self.location_filter.blockSignals(False)
+                
         except Exception as e:
-            print(f"Error loading categories: {e}")
+            print(f"Error loading filters: {e}")
+
+    def _apply_stock_filter(self):
+        """Filter current product list by stock level locally."""
+        stock_filter = self.stock_filter.currentText()
+        
+        filtered = self.products
+        if stock_filter == "In Stock":
+            filtered = [p for p in self.products if p.get("current_stock", 0) > 0]
+        elif stock_filter == "Low Stock":
+            filtered = [p for p in self.products if p.get("is_low_stock", False)]
+        elif stock_filter == "Out of Stock":
+            filtered = [p for p in self.products if p.get("current_stock", 0) <= 0]
+            
+        self._update_table(filtered)
+
+    def _on_stock_filter_change(self):
+        self._apply_stock_filter()
 
     def _update_table(self, products):
         """Update the table with product data."""
         self.table.setRowCount(0)
         for i, product in enumerate(products):
             self.table.insertRow(i)
-            
-            # SKU
+            # SKU & Name
             self.table.setItem(i, 0, QTableWidgetItem(product.get("sku", "")))
-            
-            # Name
             self.table.setItem(i, 1, QTableWidgetItem(product.get("name", "")))
+            
+            # Location
+            loc_item = QTableWidgetItem(product.get("location_name", "Unknown"))
+            loc_item.setForeground(Qt.gray)
+            self.table.setItem(i, 2, loc_item)
             
             # Category
             category = product.get("category", {})
             cat_name = category.get("name", "Uncategorized") if category else "Uncategorized"
-            self.table.setItem(i, 2, QTableWidgetItem(cat_name))
+            self.table.setItem(i, 3, QTableWidgetItem(cat_name))
             
             # Stock
             current_stock = product.get("current_stock", 0)
             stock_item = QTableWidgetItem(f"{current_stock:.2f}")
-            
-            # Color code stock level
             min_stock = product.get("min_stock_level", 0) or 0
             if current_stock <= 0:
                 stock_item.setForeground(Qt.red)
-            elif current_stock <= min_stock:
+            elif product.get("is_low_stock"):
                 stock_item.setForeground(Qt.yellow)
-            
-            self.table.setItem(i, 3, stock_item)
+            self.table.setItem(i, 4, stock_item)
             
             # Unit
-            self.table.setItem(i, 4, QTableWidgetItem(product.get("unit", "pcs")))
+            self.table.setItem(i, 5, QTableWidgetItem(product.get("unit", "pcs")))
             
             # Price
             price = product.get("selling_price", 0)
-            self.table.setItem(i, 5, QTableWidgetItem(f"₦{price:,.2f}"))
+            self.table.setItem(i, 6, QTableWidgetItem(f"₦{price:,.2f}"))
             
-            # Actions (Edit/Detail placeholder)
+            # Margin %
+            margin_pct = product.get("margin_pct", 0)
+            margin_item = QTableWidgetItem(f"{margin_pct:.1f}%")
+            if margin_pct < 0: margin_item.setForeground(Qt.red)
+            elif margin_pct < 15: margin_item.setForeground(Qt.yellow)
+            else: margin_item.setForeground(Qt.green)
+            margin_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 7, margin_item)
+            
+            # Actions
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(4, 4, 4, 4)
-            actions_layout.setSpacing(8)
+            actions_layout.setContentsMargins(4, 2, 4, 2)
+            actions_layout.setSpacing(6)
             
-            edit_btn = QPushButton("Edit")
-            edit_btn.setFixedWidth(50)
-            edit_btn.setStyleSheet("font-size: 10px; padding: 4px;")
-            edit_btn.clicked.connect(lambda checked, p=product: self._on_edit_product(p))
+            def create_icon_btn(text, color, tooltip, callback):
+                btn = QPushButton(text)
+                btn.setFixedSize(28, 28)
+                btn.setCursor(Qt.PointingHandCursor)
+                btn.setToolTip(tooltip)
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {color}22;
+                        border: 1px solid {color}44;
+                        border-radius: 4px;
+                        font-size: 14px;
+                        color: {color};
+                    }}
+                    QPushButton:hover {{
+                        background: {color}44;
+                        border: 1px solid {color};
+                    }}
+                """)
+                btn.clicked.connect(callback)
+                return btn
+
+            # Edit
+            edit_btn = create_icon_btn("✏️", "#4dabf7", "Edit Product", lambda p=product: self._on_edit_product(p))
             actions_layout.addWidget(edit_btn)
             
-            adjust_btn = QPushButton("Stock")
-            adjust_btn.setFixedWidth(50)
-            adjust_btn.setStyleSheet("font-size: 10px; padding: 4px; background-color: #3d3d3d;")
-            adjust_btn.clicked.connect(lambda checked, p=product: self._on_adjust_stock(p))
+            # Stock Adjust
+            adjust_btn = create_icon_btn("📦", "#ffd43b", "Stock Adjustment", lambda p=product: self._on_adjust_stock(p))
             actions_layout.addWidget(adjust_btn)
             
+            # History
+            history_btn = create_icon_btn("📜", "#63e6be", "Movement History", lambda p=product: self._on_view_history(p))
+            actions_layout.addWidget(history_btn)
+            
+            # Delete
+            delete_btn = create_icon_btn("🗑️", "#ff6b6b", "Delete Product", lambda p=product: self._on_delete_product(p))
+            actions_layout.addWidget(delete_btn)
+            
             actions_layout.addStretch()
-            self.table.setCellWidget(i, 6, actions_widget)
+            self.table.setCellWidget(i, 8, actions_widget)
             
         self.stats_label.setText(f"Showing {len(products)} products")
 
@@ -222,6 +300,26 @@ class InventoryView(QWidget):
         dialog = StockDialog(self, product)
         if dialog.exec():
             self._load_data()
+
+    def _on_view_history(self, product: dict):
+        """Show product movement history."""
+        dialog = HistoryDialog(self, product)
+        dialog.exec()
+
+    def _on_delete_product(self, product: dict):
+        """Delete a product with confirmation."""
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete '{product['name']}'?\nThis will deactivate the product.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            try:
+                api_client.delete_item(product["id"])
+                self._load_data()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete product: {e}")
 
     def _on_search(self):
         """Filter products based on search query."""

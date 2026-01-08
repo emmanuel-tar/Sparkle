@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictException, NotFoundException, BadRequestException
 from app.models.inventory import Category, InventoryItem, StockMovement, MovementType
+from app.models.location import Location
 from app.schemas.inventory import (
     CategoryCreate,
     CategoryResponse,
@@ -36,14 +37,33 @@ async def list_categories(
     is_active: Optional[bool] = True,
 ):
     """List all categories."""
-    query = select(Category)
+    from sqlalchemy import func
+    
+    # Subquery to count products per category
+    product_counts = (
+        select(InventoryItem.category_id, func.count(InventoryItem.id).label("count"))
+        .group_by(InventoryItem.category_id)
+        .subquery()
+    )
+    
+    query = (
+        select(Category, func.coalesce(product_counts.c.count, 0).label("count"))
+        .outerjoin(product_counts, Category.id == product_counts.c.category_id)
+    )
+    
     if is_active is not None:
         query = query.where(Category.is_active == is_active)
     
     result = await db.execute(query)
-    categories = result.scalars().all()
+    categories_with_counts = result.all()
     
-    return [CategoryResponse.model_validate(cat) for cat in categories]
+    output = []
+    for cat, count in categories_with_counts:
+        item = CategoryResponse.model_validate(cat)
+        item.product_count = count
+        output.append(item)
+    
+    return output
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=201)
@@ -77,7 +97,9 @@ async def list_inventory_items(
     """
     List inventory items with filtering and search.
     """
-    query = select(InventoryItem).where(InventoryItem.is_active == True)
+    query = select(InventoryItem, Location.name.label("location_name")).join(
+        Location, InventoryItem.location_id == Location.id
+    ).where(InventoryItem.is_active == True)
     
     # Location filter (required for non-super-admin)
     if location_id:
@@ -104,12 +126,21 @@ async def list_inventory_items(
     query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
-    items = result.scalars().all()
+    items_with_locations = result.all()
     
     response_items = []
-    for item in items:
+    for item, location_name in items_with_locations:
         item_dict = InventoryItemResponse.model_validate(item)
+        item_dict.location_name = location_name
         item_dict.is_low_stock = item.is_low_stock
+        
+        # Calculate financials
+        cost = float(item.cost_price or 0)
+        selling = float(item.selling_price)
+        item_dict.margin = selling - cost
+        item_dict.margin_pct = (item_dict.margin / selling * 100) if selling > 0 else 0
+        item_dict.markup_pct = (item_dict.margin / cost * 100) if cost > 0 else 0
+        
         response_items.append(item_dict)
     
     # Filter low stock if requested
@@ -127,15 +158,27 @@ async def get_inventory_item(
 ):
     """Get a specific inventory item."""
     result = await db.execute(
-        select(InventoryItem).where(InventoryItem.id == item_id)
+        select(InventoryItem, Location.name.label("location_name"))
+        .join(Location, InventoryItem.location_id == Location.id)
+        .where(InventoryItem.id == item_id)
     )
-    item = result.scalar_one_or_none()
+    row = result.one_or_none()
     
-    if item is None:
+    if row is None:
         raise NotFoundException(f"Item {item_id} not found")
     
+    item, location_name = row
     response = InventoryItemResponse.model_validate(item)
+    response.location_name = location_name
     response.is_low_stock = item.is_low_stock
+    
+    # Calculate financials
+    cost = float(item.cost_price or 0)
+    selling = float(item.selling_price)
+    response.margin = selling - cost
+    response.margin_pct = (response.margin / selling * 100) if selling > 0 else 0
+    response.markup_pct = (response.margin / cost * 100) if cost > 0 else 0
+    
     return response
 
 
