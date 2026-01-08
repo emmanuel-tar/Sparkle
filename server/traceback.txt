@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "C:\Users\Tar Emmanuel\Desktop\Least_Used\Sparkle\Sparkle\server\app\models\__init__.py", line 11, in <module>
+    from app.models.sales import Sale, SaleItem, PaymentMethod
+  File "C:\Users\Tar Emmanuel\Desktop\Least_Used\Sparkle\Sparkle\server\app\models\sales.py", line 53, in <module>
+    class Sale(Base, UUIDMixin, TimestampMixin):
+  File "C:\Users\Tar Emmanuel\AppData\Local\Programs\Python\Python311\Lib\site-packages\sqlalchemy\orm\decl_api.py", line 846, in __init_subclass__
+    _as_declarative(cls._sa_registry, cls, cls.__dict__)
+  File "C:\Users\Tar Emmanuel\AppData\Local\Programs\Python\Python311\Lib\site-packages\sqlalchemy\orm\decl_base.py", line 245, in _as_declarative
+    return _MapperConfig.setup_mapping(registry, cls, dict_, None, {})
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Tar Emmanuel\AppData\Local\Programs\Python\Python311\Lib\site-packages\sqlalchemy\orm\decl_base.py", line 326, in setup_mapping
+    return _ClassScanMapperConfig(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Tar Emmanuel\AppData\Local\Programs\Python\Python311\Lib\site-packages\sqlalchemy\orm\decl_base.py", line 573, in __init__
+    self._extract_mappable_attributes()
+  File "C:\Users\Tar Emmanuel\AppData\Local\Programs\Python\Python311\Lib\site-packages\sqlalchemy\orm\decl_base.py", line 1530, in _extract_mappable_attributes
+    raise exc.InvalidRequestError(
+sqlalchemy.exc.InvalidRequestError: Attribute name 'metadata' is reserved when using the Declarative API.

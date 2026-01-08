@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sparkle_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-retail_erp}
+      POSTGRES_USER: ${POSTGRES_USER:-retail_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sparkle_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-retail_admin} -d ${POSTGRES_DB:-retail_erp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sparkle_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sparkle_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sparkle_network
+
+  # Uncomment for production deployment
+  # api_server:
+  #   build: ./server
+  #   container_name: sparkle_api
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+  #     REDIS_URL: redis://redis:6379/0
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - sparkle_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sparkle_network:
+    driver: bridge

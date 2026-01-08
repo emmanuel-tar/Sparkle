@@ -1,0 +1,28 @@
+# RetailPro ERP Client Dependencies
+
+# GUI Framework
+PySide6>=6.6.0
+
+# Database
+sqlalchemy>=2.0.25
+
+# HTTP Client
+httpx>=0.26.0
+
+# WebSocket
+websockets>=12.0
+
+# Configuration
+python-dotenv>=1.0.0
+
+# PDF Generation (Receipts)
+reportlab>=4.0.0
+
+# Image Processing
+Pillow>=10.0.0
+
+# Utilities
+python-dateutil>=2.8.2
+
+# Development
+pytest>=7.4.4
