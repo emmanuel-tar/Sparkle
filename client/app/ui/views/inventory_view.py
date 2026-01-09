@@ -7,7 +7,7 @@ Displays product list, allows search, filtering, and basic inventory actions.
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QComboBox, QFrame, QMessageBox, QFileDialog, QMenu,
+    QComboBox, QFrame, QMessageBox, QFileDialog, QMenu, QDialog,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QIcon
@@ -16,6 +16,7 @@ from app.api import api_client
 from app.ui.dialogs.product_dialog import ProductDialog
 from app.ui.dialogs.stock_dialog import StockDialog
 from app.ui.dialogs.history_dialog import HistoryDialog
+from app.ui.dialogs.import_dialog import ImportDialog
 
 
 class InventoryView(QWidget):
@@ -365,21 +366,12 @@ class InventoryView(QWidget):
                 QMessageBox.critical(self, "Error", f"Export failed: {e}")
 
     def _on_import_inventory(self):
-        """Import inventory from CSV."""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Import Inventory", "", "CSV Files (*.csv)"
-        )
-        if path:
-            try:
-                result = api_client.import_inventory(path)
-                msg = f"Import Complete!\n\nImported: {result.get('imported_count', 0)}\nErrors: {len(result.get('errors', []))}"
-                if result.get("errors"):
-                    msg += f"\n\nFirst few errors:\n" + "\n".join(result["errors"][:5])
-                
-                QMessageBox.information(self, "Import Result", msg)
-                self._load_data()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Import failed: {e}")
+        """Import inventory from CSV using the import dialog."""
+        dialog = ImportDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            # Reload data after successful import
+            self._load_data()
+            QMessageBox.information(self, "Success", "Inventory reloaded!")
 
     def _on_download_template(self):
         """Download import template."""

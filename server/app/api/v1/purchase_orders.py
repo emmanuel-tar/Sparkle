@@ -4,10 +4,11 @@ Purchase Order API Endpoints
 
 import uuid
 from typing import List, Optional
+from decimal import Decimal
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.api import deps
@@ -21,12 +22,12 @@ router = APIRouter()
 
 
 @router.get("/", response_model=List[schemas.PurchaseOrderSummary])
-def list_purchase_orders(
+async def list_purchase_orders(
     skip: int = 0,
     limit: int = 100,
     status: Optional[POStatus] = None,
     supplier_id: Optional[uuid.UUID] = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
@@ -40,7 +41,8 @@ def list_purchase_orders(
         query = query.where(PurchaseOrder.supplier_id == supplier_id)
         
     query = query.offset(skip).limit(limit).order_by(PurchaseOrder.created_at.desc())
-    results = db.execute(query).scalars().all()
+    result = await db.execute(query)
+    results = result.scalars().all()
     
     # Map to summary schema
     summary_results = []
@@ -59,21 +61,24 @@ def list_purchase_orders(
 
 
 @router.post("/", response_model=schemas.PurchaseOrder, status_code=status.HTTP_201_CREATED)
-def create_purchase_order(
+async def create_purchase_order(
     po_in: schemas.PurchaseOrderCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
     Create a new purchase order.
     """
     # Check if supplier exists
-    supplier = db.get(Supplier, po_in.supplier_id)
+    supplier = await db.get(Supplier, po_in.supplier_id)
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
         
     # Check for duplicate order number
-    existing_po = db.execute(select(PurchaseOrder).where(PurchaseOrder.order_number == po_in.order_number)).scalar_one_or_none()
+    query = select(PurchaseOrder).where(PurchaseOrder.order_number == po_in.order_number)
+    result = await db.execute(query)
+    existing_po = result.scalar_one_or_none()
+    
     if existing_po:
         raise HTTPException(status_code=400, detail="Order number already exists")
 
@@ -88,13 +93,13 @@ def create_purchase_order(
     )
     
     db.add(po)
-    db.flush() # Get PO ID
+    await db.flush() # Get PO ID
     
     for item_in in po_in.items:
         # Check if inventory item exists
-        inv_item = db.get(InventoryItem, item_in.item_id)
+        inv_item = await db.get(InventoryItem, item_in.item_id)
         if not inv_item:
-            db.rollback()
+            await db.rollback()
             raise HTTPException(status_code=404, detail=f"Inventory item {item_in.item_id} not found")
             
         po_item = PurchaseOrderItem(
@@ -107,38 +112,47 @@ def create_purchase_order(
         db.add(po_item)
         
     po.total_amount = total_amount
-    db.commit()
-    db.refresh(po)
+    await db.commit()
+    await db.refresh(po)
     return po
 
 
 @router.get("/{po_id}", response_model=schemas.PurchaseOrder)
-def get_purchase_order(
+async def get_purchase_order(
     po_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
     Get purchase order by ID.
     """
-    po = db.get(PurchaseOrder, po_id)
+    po = await db.get(PurchaseOrder, po_id)
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
     return po
 
 
+from sqlalchemy.orm import selectinload
+
 @router.patch("/{po_id}", response_model=schemas.PurchaseOrder)
-def update_purchase_order(
+async def update_purchase_order(
     po_id: uuid.UUID,
     po_in: schemas.PurchaseOrderUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
     Update a purchase order status or details.
     When moving to RECEIVED, inventory levels are updated.
     """
-    po = db.get(PurchaseOrder, po_id)
+    # Explicitly load items and their inventory items to avoid MissingGreenlet
+    query = select(PurchaseOrder).options(
+        selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.inventory_item)
+    ).where(PurchaseOrder.id == po_id)
+    
+    result = await db.execute(query)
+    po = result.scalar_one_or_none()
+    
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
         
@@ -155,8 +169,9 @@ def update_purchase_order(
             po.received_date = datetime.utcnow()
             
             # Update stock levels for each item
+            # Note: po.items is available via lazy="selectin"
             for po_item in po.items:
-                inv_item = po_item.inventory_item
+                inv_item = po_item.inventory_item # also selectin loaded
                 
                 # Snapshot before
                 stock_before = float(inv_item.current_stock)
@@ -188,36 +203,36 @@ def update_purchase_order(
     if po_in.supplier_id is not None:
         po.supplier_id = po_in.supplier_id
 
-    db.commit()
-    db.refresh(po)
+    await db.commit()
+    await db.refresh(po)
     return po
 
 
 @router.delete("/{po_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_purchase_order(
+async def delete_purchase_order(
     po_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
     Delete a purchase order (only if PENDING or CANCELLED).
     """
-    po = db.get(PurchaseOrder, po_id)
+    po = await db.get(PurchaseOrder, po_id)
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
         
     if po.status == POStatus.RECEIVED:
         raise HTTPException(status_code=400, detail="Cannot delete a received order")
         
-    db.delete(po)
-    db.commit()
+    await db.delete(po)
+    await db.commit()
     return None
 
 
 @router.get("/suggest/{supplier_id}", response_model=List[schemas.PurchaseOrderItemCreate])
-def suggest_po_items(
+async def suggest_po_items(
     supplier_id: uuid.UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user = Depends(deps.get_current_active_user),
 ):
     """
@@ -230,7 +245,8 @@ def suggest_po_items(
         InventoryItem.current_stock <= InventoryItem.reorder_point
     )
     
-    items = db.execute(query).scalars().all()
+    result = await db.execute(query)
+    items = result.scalars().all()
     suggestions = []
     
     for item in items:

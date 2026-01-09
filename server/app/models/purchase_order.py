@@ -62,11 +62,12 @@ class PurchaseOrder(Base, UUIDMixin, TimestampMixin):
     )
     
     # Relationships
-    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="purchase_orders")
+    supplier: Mapped["Supplier"] = relationship("Supplier", back_populates="purchase_orders", lazy="selectin")
     items: Mapped[list["PurchaseOrderItem"]] = relationship(
         "PurchaseOrderItem",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
+        lazy="selectin"
     )
     created_by: Mapped[Optional["User"]] = relationship("User")
     
@@ -99,7 +100,7 @@ class PurchaseOrderItem(Base, UUIDMixin, TimestampMixin):
     
     # Relationships
     purchase_order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", back_populates="items")
-    inventory_item: Mapped["InventoryItem"] = relationship("InventoryItem")
+    inventory_item: Mapped["InventoryItem"] = relationship("InventoryItem", lazy="selectin")
     
     def __repr__(self) -> str:
         return f"<PurchaseOrderItem(id={self.id}, po_id={self.purchase_order_id}, qty={self.quantity})>"

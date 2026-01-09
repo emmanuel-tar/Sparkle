@@ -156,8 +156,20 @@ class APIClient:
             data = {"message": response.text}
         
         if not response.is_success:
+            # Handle Validation Errors (422)
+            if response.status_code == 422 and isinstance(data.get("detail"), list):
+                # Extract messages from detail list
+                messages = []
+                for err in data["detail"]:
+                    loc = ".".join(str(l) for l in err.get("loc", []))
+                    msg = err.get("msg", "Unknown error")
+                    messages.append(f"{loc}: {msg}")
+                message = "\n".join(messages)
+            else:
+                message = data.get("message", f"Request failed ({response.status_code})")
+
             raise APIError(
-                data.get("message", "Request failed"),
+                message,
                 response.status_code,
                 data.get("details"),
             )
@@ -378,7 +390,7 @@ class APIClient:
             params["supplier_id"] = supplier_id
         if status:
             params["status"] = status
-        return self.get("/purchase-orders", params)
+        return self.get("/purchase-orders/", params)
     
     def get_purchase_order(self, po_id: str) -> dict:
         """Get a single purchase order."""
@@ -386,7 +398,7 @@ class APIClient:
     
     def create_purchase_order(self, po_data: dict) -> dict:
         """Create a new purchase order."""
-        return self.post("/purchase-orders", po_data)
+        return self.post("/purchase-orders/", po_data)
     
     def update_purchase_order(self, po_id: str, po_data: dict) -> dict:
         """Update a purchase order (status, notes, etc)."""

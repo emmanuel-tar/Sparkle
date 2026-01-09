@@ -6,6 +6,7 @@ Product catalog and stock management.
 
 import csv
 import io
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -24,7 +25,6 @@ from app.schemas.inventory import (
     InventoryItemCreate,
     InventoryItemUpdate,
     InventoryItemResponse,
-    StockAdjustment,
     StockAdjustment,
     StockMovementResponse,
     StockMovementDetailResponse,
@@ -291,7 +291,7 @@ async def delete_inventory_item(
     current_user: CurrentUser,
 ):
     """Deactivate an inventory item (soft delete)."""
-    from app.api.deps import NotFoundException
+    from app.core.exceptions import NotFoundException
     result = await db.execute(
         select(InventoryItem).where(InventoryItem.id == item_id)
     )
@@ -355,9 +355,6 @@ async def adjust_stock(
     await db.refresh(movement)
     
     return StockMovementResponse.model_validate(movement)
-
-
-    return [StockMovementResponse.model_validate(m) for m in movements]
 
 
 @router.get("/movements", response_model=List[StockMovementDetailResponse], dependencies=[Depends(require_permission("view_reports"))])
@@ -487,15 +484,52 @@ async def import_inventory_csv(
     current_user: CurrentUser,
     file: UploadFile = File(...),
 ):
-    """Import inventory from CSV."""
+    """Import inventory from CSV.
+    
+    Expected columns (case-insensitive):
+    - SKU (required)
+    - Name (required)
+    - Selling Price (required)
+    - Location (optional, defaults to user's location)
+    - Barcode, Description, Category, Supplier, Stock, Min Stock, Cost Price, Unit (optional)
+    """
     if not file.filename.endswith('.csv'):
         raise BadRequestException("Only CSV files are allowed")
     
     contents = await file.read()
-    buffer = io.StringIO(contents.decode('utf-8'))
+    
+    # Try decoding with different encodings
+    text_content = None
+    used_encoding = None
+    for encoding in ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252']:
+        try:
+            text_content = contents.decode(encoding)
+            used_encoding = encoding
+            break
+        except UnicodeDecodeError:
+            continue
+            
+    if text_content is None:
+        raise BadRequestException("Unable to decode file. Supported encodings: UTF-8, Latin-1, CP1252")
+
+    buffer = io.StringIO(text_content)
     reader = csv.DictReader(buffer)
     
+    # Validate that CSV has headers
+    if not reader.fieldnames:
+        raise BadRequestException("CSV file is empty or has no headers")
+    
+    # Normalize headers to support case-insensitive matching
+    reader.fieldnames = [name.strip().lower() for name in reader.fieldnames]
+    
+    # Check for required columns
+    required_cols = {"sku", "name", "selling price"}
+    missing_cols = required_cols - set(reader.fieldnames)
+    if missing_cols:
+        raise BadRequestException(f"Missing required columns: {', '.join(missing_cols)}")
+    
     imported_count = 0
+    updated_count = 0
     errors = []
     
     # Pre-fetch locations and categories to avoid constant DB calls
@@ -508,66 +542,112 @@ async def import_inventory_csv(
     sup_result = await db.execute(select(Supplier))
     suppliers = {sup.name.lower(): sup.id for sup in sup_result.scalars().all()}
     
-    for row_idx, row in enumerate(reader, start=1):
+    # Check existing SKUs to detect duplicates
+    existing_skus_result = await db.execute(select(InventoryItem.sku))
+    existing_skus = {sku for (sku,) in existing_skus_result.all()}
+    
+    for row_idx, row in enumerate(reader, start=2):  # Start at 2 because row 1 is headers
         try:
-            sku = row.get("SKU")
-            if not sku:
-                errors.append(f"Row {row_idx}: Missing SKU")
+            # Skip completely empty rows
+            if not any(v and str(v).strip() for v in row.values()):
                 continue
+
+            # Extract and validate required fields
+            sku = row.get("sku", "").strip()
+            name = row.get("name", "").strip()
+            selling_price_str = row.get("selling price", "").strip()
+            
+            if not sku:
+                errors.append(f"Row {row_idx}: Missing or empty SKU")
+                continue
+            
+            if not name:
+                errors.append(f"Row {row_idx}: Missing or empty Name")
+                continue
+            
+            if not selling_price_str:
+                errors.append(f"Row {row_idx}: Missing or empty Selling Price")
+                continue
+            
+            def parse_float(value, default=None):
+                """Parse float value, handling comma separators."""
+                if not value: 
+                    return default
+                try:
+                    return float(str(value).strip().replace(',', '.'))
+                except (ValueError, AttributeError):
+                    return default
+            
+            # Parse prices
+            selling_price = parse_float(selling_price_str)
+            if selling_price is None or selling_price <= 0:
+                errors.append(f"Row {row_idx}: Invalid Selling Price '{selling_price_str}' (must be > 0)")
+                continue
+            
+            cost_price = parse_float(row.get("cost price"))
             
             # Find location
-            loc_name = row.get("Location", "").lower()
-            loc_id = locations.get(loc_name) or current_user.location_id
+            loc_name = row.get("location", "").strip().lower()
+            loc_id = locations.get(loc_name) if loc_name else None
+            loc_id = loc_id or current_user.location_id
             
             if not loc_id:
-                errors.append(f"Row {row_idx}: Location '{row.get('Location')}' not found")
+                errors.append(f"Row {row_idx}: Location '{row.get('location')}' not found and user has no default location")
                 continue
-                
-            # Find category
-            cat_name = row.get("Category", "").lower()
-            cat_id = categories.get(cat_name)
             
-            # Find supplier
-            sup_name = row.get("Supplier", "").lower()
-            sup_id = suppliers.get(sup_name)
-
+            # Find optional relationships
+            cat_name = row.get("category", "").strip().lower()
+            cat_id = categories.get(cat_name) if cat_name else None
+            
+            sup_name = row.get("supplier", "").strip().lower()
+            sup_id = suppliers.get(sup_name) if sup_name else None
+            
             # Check if item exists
             result = await db.execute(select(InventoryItem).where(InventoryItem.sku == sku))
             item = result.scalar_one_or_none()
             
             item_data = {
                 "sku": sku,
-                "barcode": row.get("Barcode") or None,
-                "name": row.get("Name", "Unnamed Item"),
-                "description": row.get("Description"),
+                "barcode": row.get("barcode") or None,
+                "name": name,
+                "description": row.get("description") or None,
                 "category_id": cat_id,
                 "location_id": loc_id,
                 "supplier_id": sup_id,
-                "current_stock": float(row.get("Stock") or 0),
-                "min_stock_level": float(row.get("Min Stock") or 0),
-                "cost_price": float(row.get("Cost Price") or 0),
-                "selling_price": float(row.get("Selling Price") or 0),
-                "unit": row.get("Unit") or "pcs",
+                "current_stock": parse_float(row.get("stock"), 0.0),
+                "min_stock_level": parse_float(row.get("min stock")),
+                "cost_price": cost_price,
+                "selling_price": selling_price,
+                "unit": (row.get("unit") or "pcs").strip(),
             }
 
             if item:
-                # Update existing
+                # Update existing - only update non-null values from CSV
                 for key, value in item_data.items():
-                    setattr(item, key, value)
+                    if value is not None or key in ["barcode", "description"]:
+                        setattr(item, key, value)
+                updated_count += 1
             else:
                 # Create new
                 item = InventoryItem(**item_data)
                 db.add(item)
-            
-            imported_count += 1
+                imported_count += 1
             
         except Exception as e:
-            errors.append(f"Row {row_idx}: {str(e)}")
-            
-    await db.commit()
+            errors.append(f"Row {row_idx}: Unexpected error: {str(e)}")
+    
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise BadRequestException(f"Database commit failed: {str(e)}")
     
     return {
-        "success": True,
+        "success": len(errors) == 0,
         "imported_count": imported_count,
-        "errors": errors
+        "updated_count": updated_count,
+        "total_processed": imported_count + updated_count,
+        "errors": errors,
+        "encoding_used": used_encoding,
+        "message": f"Imported {imported_count} new items, updated {updated_count} existing items"
     }
