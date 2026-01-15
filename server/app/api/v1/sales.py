@@ -271,7 +271,51 @@ async def create_sale(
     await db.commit()
     await db.refresh(sale)
     
-    return SaleResponse.model_validate(sale)
+    # Convert to dict to avoid SQLAlchemy relationship lazy loading issues
+    # Pydantic will try to access relationships which causes async errors
+    sale_data = {
+        "id": sale.id,
+        "receipt_number": sale.receipt_number,
+        "location_id": sale.location_id,
+        "terminal_id": sale.terminal_id,
+        "customer_id": sale.customer_id,
+        "cashier_id": sale.cashier_id,
+        "subtotal": float(sale.subtotal),
+        "tax_amount": float(sale.tax_amount),
+        "discount_amount": float(sale.discount_amount),
+        "discount_reason": sale.discount_reason,
+        "total_amount": float(sale.total_amount),
+        "payment_method": sale.payment_method,
+        "payment_details": sale.payment_details,
+        "amount_tendered": float(sale.amount_tendered) if sale.amount_tendered else None,
+        "change_given": float(sale.change_given) if sale.change_given else None,
+        "status": sale.status,
+        "is_synced": sale.is_synced,
+        "points_earned": sale.points_earned,
+        "points_redeemed": sale.points_redeemed,
+        "items_snapshot": sale.items_snapshot,
+        "created_at": sale.created_at,
+        "items": [
+            {
+                "id": item.id,
+                "item_id": item.item_id,
+                "sku": item.sku,
+                "name": item.name,
+                "quantity": float(item.quantity),
+                "unit_price": float(item.unit_price),
+                "cost_price": float(item.cost_price) if item.cost_price else None,
+                "discount_percent": float(item.discount_percent),
+                "discount_amount": float(item.discount_amount),
+                "tax_rate": float(item.tax_rate),
+                "tax_amount": float(item.tax_amount),
+                "line_total": float(item.line_total),
+            }
+            for item in sale_items  # Use the items we created (they have IDs after commit)
+        ],
+        "customer": None,  # Customer is optional and not loaded here
+    }
+    
+    return SaleResponse.model_validate(sale_data)
 
 
 @router.post("/{sale_id}/void", response_model=SaleResponse, dependencies=[Depends(require_role(UserRole.SUPER_ADMIN, UserRole.ADMIN))])

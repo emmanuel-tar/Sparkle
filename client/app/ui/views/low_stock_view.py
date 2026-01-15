@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
-from app.api import api_client
+from app.api import api_client, APIError
 from app.ui.dialogs.purchase_order_dialog import PurchaseOrderDialog
 
 
@@ -87,8 +87,13 @@ class LowStockView(QWidget):
             response = api_client.get_low_stock_items()
             self.items = response
             self._update_table(self.items)
+        except APIError as e:
+            error_msg = f"Error loading low stock items: {e.message}"
+            print(error_msg)
+            self.stats_label.setText(f"Error: {e.message}")
         except Exception as e:
-            print(f"Error loading low stock items: {e}")
+            error_msg = f"Error loading low stock items: {str(e)}"
+            print(error_msg)
             self.stats_label.setText("Error loading data")
             
     def _update_table(self, items):

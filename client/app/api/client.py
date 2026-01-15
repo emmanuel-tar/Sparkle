@@ -31,7 +31,7 @@ class APIClient:
     """
     
     def __init__(self):
-        self.base_url = settings.api_url.rstrip("/") + "/"
+        self._base_url = settings.api_url.rstrip("/") + "/"
         self.timeout = settings.REQUEST_TIMEOUT
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
@@ -43,11 +43,25 @@ class APIClient:
         self._load_tokens()
     
     @property
+    def base_url(self) -> str:
+        """Get base URL."""
+        return self._base_url
+    
+    @base_url.setter
+    def base_url(self, value: str) -> None:
+        """Set base URL and reset client."""
+        self._base_url = value.rstrip("/") + "/"
+        # Reset client to use new URL
+        if self._client:
+            self._client.close()
+            self._client = None
+    
+    @property
     def client(self) -> httpx.Client:
         """Get or create HTTP client."""
         if self._client is None:
             self._client = httpx.Client(
-                base_url=self.base_url,
+                base_url=self._base_url,
                 timeout=self.timeout,
                 headers=self._get_headers(),
             )
@@ -168,10 +182,15 @@ class APIClient:
             else:
                 message = data.get("message", f"Request failed ({response.status_code})")
 
+            # Include details in message if available (especially useful for debug mode)
+            error_details = data.get("details")
+            if error_details:
+                message = f"{message}: {error_details}"
+            
             raise APIError(
                 message,
                 response.status_code,
-                data.get("details"),
+                error_details,
             )
         
         return data
@@ -260,17 +279,46 @@ class APIClient:
 
     def upload_file(self, endpoint: str, file_path: str) -> Dict[str, Any]:
         """POST request with file upload."""
-        headers = self._get_headers()
-        del headers["Content-Type"] # httpx will set this for multipart
+        # Get auth headers
+        auth_headers = self._get_headers().copy()
+        # For multipart requests, we only need Authorization header
+        # httpx will automatically set Content-Type: multipart/form-data
+        headers = {k: v for k, v in auth_headers.items() if k == "Authorization"}
         
-        with open(file_path, "rb") as f:
-            files = {"file": (Path(file_path).name, f, "text/csv")}
-            response = self.client.post(
-                endpoint.lstrip("/"),
-                headers=headers,
-                files=files
-            )
-            return self._handle_response(response)
+        # Ensure endpoint doesn't start with / to correctly join with base_url
+        clean_endpoint = endpoint.lstrip("/")
+        
+        try:
+            with open(file_path, "rb") as f:
+                # Create multipart form data
+                # The field name MUST be "file" to match FastAPI's UploadFile parameter
+                files = {"file": (Path(file_path).name, f, "text/csv")}
+                response = self.client.post(
+                    clean_endpoint,
+                    headers=headers,
+                    files=files
+                )
+                return self._handle_response(response)
+        except FileNotFoundError:
+            raise APIError(f"File not found: {file_path}", 0)
+        except Exception as e:
+            raise APIError(f"File upload failed: {str(e)}", 0)
+    
+    # ============== Health Check ==============
+    
+    def health_check(self) -> bool:
+        """Check if server is running and responding."""
+        try:
+            # Health endpoint is at root level, not under /api/v1
+            # Create a temporary client for health check since base_url includes /api/v1
+            base_url_without_api = self._base_url.replace("/api/v1/", "").rstrip("/")
+            temp_client = httpx.Client(base_url=base_url_without_api, timeout=5)
+            response = temp_client.get("/health")
+            temp_client.close()
+            return response.status_code == 200
+        except Exception:
+            # Any connection error means server is not available
+            return False
     
     # ============== Auth Methods ==============
     
@@ -291,6 +339,12 @@ class APIClient:
         except Exception:
             pass
         self._clear_tokens()
+    
+    def close(self) -> None:
+        """Close the HTTP client and clean up resources."""
+        if self._client:
+            self._client.close()
+            self._client = None
     
     def get_current_user(self) -> Dict[str, Any]:
         """Get current user info and sync local state."""
@@ -323,7 +377,7 @@ class APIClient:
     
     def get_low_stock_items(self, skip: int = 0, limit: int = 100) -> list:
         """Get items that are at or below reorder point."""
-        return self.get("/inventory/items", {"is_low_stock": True, "skip": skip, "limit": limit})
+        return self.get("/inventory/items", {"low_stock_only": True, "skip": skip, "limit": limit})
     
     def get_item_by_barcode(self, barcode: str) -> Dict[str, Any]:
         """Get item by barcode."""

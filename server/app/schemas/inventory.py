@@ -124,29 +124,43 @@ class InventoryItemResponse(BaseModel):
     
     current_stock: float
     reserved_stock: float
+    available_stock: float = 0  # current - reserved
     min_stock_level: Optional[float]
     max_stock_level: Optional[float]
     reorder_point: Optional[float]
+    reorder_quantity: Optional[float] = None
     
     cost_price: Optional[float]
     selling_price: float
     tax_rate: float
     
     unit: str
+    weight: Optional[float] = None
     image_url: Optional[str]
+    images: Optional[List[str]] = None
     
     # Extra Info
     location_name: Optional[str] = None
     supplier_name: Optional[str] = None
+    category: Optional[dict] = None  # Will contain {"id": UUID, "name": str}
     
     # Financials
     margin: float = 0
     margin_pct: float = 0
     markup_pct: float = 0
     
+    # Status
     is_active: bool
     is_taxable: bool
     is_low_stock: bool = False
+    allow_negative_stock: bool = False
+    
+    # Expiry Info
+    has_expiry: bool = False
+    shelf_life_days: Optional[int] = None
+    
+    created_at: datetime
+    updated_at: datetime
     
     created_at: datetime
     updated_at: datetime

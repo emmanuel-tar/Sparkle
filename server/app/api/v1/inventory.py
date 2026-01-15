@@ -107,11 +107,14 @@ async def list_inventory_items(
     query = select(
         InventoryItem, 
         Location.name.label("location_name"),
-        Supplier.name.label("supplier_name")
+        Supplier.name.label("supplier_name"),
+        Category.name.label("category_name")
     ).join(
         Location, InventoryItem.location_id == Location.id
     ).outerjoin(
         Supplier, InventoryItem.supplier_id == Supplier.id
+    ).outerjoin(
+        Category, InventoryItem.category_id == Category.id
     ).where(InventoryItem.is_active == True)
     
     # Location filter (required for non-super-admin)
@@ -142,11 +145,49 @@ async def list_inventory_items(
     items_with_locations = result.all()
     
     response_items = []
-    for item, location_name, supplier_name in items_with_locations:
-        item_dict = InventoryItemResponse.model_validate(item)
-        item_dict.location_name = location_name
-        item_dict.supplier_name = supplier_name
-        item_dict.is_low_stock = item.is_low_stock
+    for item, location_name, supplier_name, category_name in items_with_locations:
+        # Convert to dict first to avoid SQLAlchemy relationship lazy loading issues
+        # Pydantic will try to access relationships which causes async errors
+        item_data = {
+            "id": item.id,
+            "sku": item.sku,
+            "barcode": item.barcode,
+            "name": item.name,
+            "description": item.description,
+            "category_id": item.category_id,
+            "location_id": item.location_id,
+            "supplier_id": item.supplier_id,
+            "current_stock": float(item.current_stock),
+            "reserved_stock": float(item.reserved_stock),
+            "available_stock": float(item.available_stock),
+            "min_stock_level": float(item.min_stock_level) if item.min_stock_level else None,
+            "max_stock_level": float(item.max_stock_level) if item.max_stock_level else None,
+            "reorder_point": float(item.reorder_point) if item.reorder_point else None,
+            "reorder_quantity": float(item.reorder_quantity) if item.reorder_quantity else None,
+            "cost_price": float(item.cost_price) if item.cost_price else None,
+            "selling_price": float(item.selling_price),
+            "tax_rate": float(item.tax_rate),
+            "unit": item.unit,
+            "weight": float(item.weight) if item.weight else None,
+            "image_url": item.image_url,
+            "images": item.images,
+            "is_active": item.is_active,
+            "is_taxable": item.is_taxable,
+            "is_low_stock": item.is_low_stock,
+            "allow_negative_stock": item.allow_negative_stock,
+            "has_expiry": item.has_expiry,
+            "shelf_life_days": item.shelf_life_days,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+            "location_name": location_name,
+            "supplier_name": supplier_name,
+            "category": {
+                "id": str(item.category_id) if item.category_id else None,
+                "name": category_name or "Uncategorized"
+            },
+        }
+        
+        item_dict = InventoryItemResponse.model_validate(item_data)
         
         # Calculate financials
         cost = float(item.cost_price or 0)
@@ -175,10 +216,12 @@ async def get_inventory_item(
         select(
             InventoryItem, 
             Location.name.label("location_name"),
-            Supplier.name.label("supplier_name")
+            Supplier.name.label("supplier_name"),
+            Category.name.label("category_name")
         )
         .join(Location, InventoryItem.location_id == Location.id)
         .outerjoin(Supplier, InventoryItem.supplier_id == Supplier.id)
+        .outerjoin(Category, InventoryItem.category_id == Category.id)
         .where(InventoryItem.id == item_id)
     )
     row = result.one_or_none()
@@ -186,11 +229,48 @@ async def get_inventory_item(
     if row is None:
         raise NotFoundException(f"Item {item_id} not found")
     
-    item, location_name, supplier_name = row
-    response = InventoryItemResponse.model_validate(item)
-    response.location_name = location_name
-    response.supplier_name = supplier_name
-    response.is_low_stock = item.is_low_stock
+    item, location_name, supplier_name, category_name = row
+    
+    item_data = {
+        "id": item.id,
+        "sku": item.sku,
+        "barcode": item.barcode,
+        "name": item.name,
+        "description": item.description,
+        "category_id": item.category_id,
+        "location_id": item.location_id,
+        "supplier_id": item.supplier_id,
+        "current_stock": float(item.current_stock),
+        "reserved_stock": float(item.reserved_stock),
+        "available_stock": float(item.available_stock),
+        "min_stock_level": float(item.min_stock_level) if item.min_stock_level else None,
+        "max_stock_level": float(item.max_stock_level) if item.max_stock_level else None,
+        "reorder_point": float(item.reorder_point) if item.reorder_point else None,
+        "reorder_quantity": float(item.reorder_quantity) if item.reorder_quantity else None,
+        "cost_price": float(item.cost_price) if item.cost_price else None,
+        "selling_price": float(item.selling_price),
+        "tax_rate": float(item.tax_rate),
+        "unit": item.unit,
+        "weight": float(item.weight) if item.weight else None,
+        "image_url": item.image_url,
+        "images": item.images,
+        "is_active": item.is_active,
+        "is_taxable": item.is_taxable,
+        "is_low_stock": item.is_low_stock,
+        "allow_negative_stock": item.allow_negative_stock,
+        "has_expiry": item.has_expiry,
+        "shelf_life_days": item.shelf_life_days,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+        "location_name": location_name,
+        "supplier_name": supplier_name,
+        "category": {
+            "id": str(item.category_id) if item.category_id else None,
+            "name": category_name or "Uncategorized"
+        },
+    }
+    
+    response = InventoryItemResponse.model_validate(item_data)
     
     # Calculate financials
     cost = float(item.cost_price or 0)
@@ -615,10 +695,19 @@ async def import_inventory_csv(
                 "location_id": loc_id,
                 "supplier_id": sup_id,
                 "current_stock": parse_float(row.get("stock"), 0.0),
+                "reserved_stock": 0.0,  # Default: no reserved stock
                 "min_stock_level": parse_float(row.get("min stock")),
+                "max_stock_level": parse_float(row.get("max stock")),
                 "cost_price": cost_price,
                 "selling_price": selling_price,
+                "tax_rate": parse_float(row.get("tax rate"), 0.0),
                 "unit": (row.get("unit") or "pcs").strip(),
+                "weight": parse_float(row.get("weight")),
+                "image_url": row.get("image url") or None,
+                "is_active": True,  # Default: active
+                "is_taxable": True,  # Default: taxable
+                "allow_negative_stock": False,  # Default: don't allow negative
+                "has_expiry": False,  # Default: no expiry
             }
 
             if item:

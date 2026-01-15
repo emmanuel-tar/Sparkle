@@ -29,13 +29,29 @@ class LoginThread(QThread):
     
     def run(self):
         try:
+            # First check if server is reachable
+            if not api_client.health_check():
+                self.error.emit("Server is not responding.\nPlease verify:\n• Server URL is correct\n• Server is running\n• Network connection is active")
+                return
+            
             result = api_client.login(self.username, self.password)
             user = api_client.get_current_user()
             self.success.emit(user)
         except APIError as e:
             self.error.emit(e.message)
         except Exception as e:
-            self.error.emit(str(e))
+            import httpx
+            error_msg = str(e)
+            
+            # Provide better error messages
+            if isinstance(e, httpx.ConnectError):
+                error_msg = "Cannot connect to server. Please check:\n• Server URL is correct\n• Server is running\n• Network connection is active"
+            elif isinstance(e, httpx.TimeoutException):
+                error_msg = "Request timeout. Server is not responding.\nPlease check:\n• Server URL\n• Server status\n• Network connection"
+            elif isinstance(e, httpx.RequestError):
+                error_msg = f"Connection error: {error_msg}"
+            
+            self.error.emit(error_msg)
 
 
 class LoginWindow(QWidget):

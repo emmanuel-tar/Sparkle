@@ -223,6 +223,13 @@ def main() -> int:
     
     # Show login window
     login_window = LoginWindow()
+    
+    # Connect login signal to show main window
+    def on_login_complete():
+        # Main window will handle showing itself
+        pass
+    
+    login_window.login_successful.connect(on_login_complete)
     login_window.show()
     
     # Run event loop

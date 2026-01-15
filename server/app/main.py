@@ -28,13 +28,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     print(f"Starting {settings.app_name} v{settings.app_version}")
     await init_db()
     print("Database initialized")
+    print("Application ready for requests")
     
-    yield
-    
-    # Shutdown
-    print("Shutting down...")
-    await close_db()
-    print("Database connections closed")
+    try:
+        yield
+    except Exception as e:
+        print(f"Error during shutdown: {e}")
+        raise
+    finally:
+        # Shutdown
+        print("\nShutting down...")
+        await close_db()
+        print("Database connections closed")
 
 
 # Create FastAPI application

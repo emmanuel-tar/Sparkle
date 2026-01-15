@@ -70,9 +70,18 @@ class ProductDialog(QDialog):
             self.description_input.setPlainText(self.product_data.get("description", ""))
         form_layout.addRow("Description:", self.description_input)
         
+        # Category with live preview
+        cat_layout = QHBoxLayout()
         self.category_combo = QComboBox()
         self.category_combo.addItem("Select Category", None)
-        form_layout.addRow("Category:", self.category_combo)
+        self.category_combo.currentIndexChanged.connect(self._update_category_display)
+        cat_layout.addWidget(self.category_combo, 1)
+        
+        self.category_label = QLabel("No category selected")
+        self.category_label.setStyleSheet("color: #888888; font-size: 11px; padding-left: 8px;")
+        self.category_label.setMinimumHeight(20)
+        cat_layout.addWidget(self.category_label)
+        form_layout.addRow("Category:", cat_layout)
         
         self.supplier_combo = QComboBox()
         self.supplier_combo.addItem("Select Supplier", None)
@@ -185,8 +194,19 @@ class ProductDialog(QDialog):
                     index = self.category_combo.findData(self.product_data.get("category_id"))
                     if index >= 0:
                         self.category_combo.setCurrentIndex(index)
+                        self._update_category_display()  # Update display after setting
         except Exception as e:
             print(f"Error loading categories for dialog: {e}")
+
+    def _update_category_display(self):
+        """Update category display when selection changes."""
+        selected_text = self.category_combo.currentText()
+        if selected_text == "Select Category":
+            self.category_label.setText("No category selected")
+            self.category_label.setStyleSheet("color: #888888; font-size: 11px; padding-left: 8px;")
+        else:
+            self.category_label.setText(f"📁 {selected_text}")
+            self.category_label.setStyleSheet("color: #2ed573; font-size: 11px; padding-left: 8px; font-weight: bold;")
 
     def _load_suppliers(self):
         """Fetch suppliers from API."""
@@ -243,28 +263,43 @@ class ProductDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", "SKU, Name and a valid Selling Price are required.")
             return
             
-        # Prepare data
-        data = {
-            "sku": sku,
-            "name": name,
-            "barcode": self.barcode_input.text().strip() or None,
-            "description": self.description_input.toPlainText().strip() or None,
-            "category_id": self.category_combo.currentData(),
-            "supplier_id": self.supplier_combo.currentData(),
-            "selling_price": price,
-            "cost_price": self.cost_price.value(),
-            "unit": self.unit_input.text().strip(),
-            "min_stock_level": self.min_stock.value(),
-            "allow_negative_stock": self.allow_negative.isChecked(),
-        }
+        # Helper to convert UUID to string if needed
+        def to_uuid_str(value):
+            if value is None:
+                return None
+            return str(value) if value else None
         
-        if not self.is_edit:
-            data["current_stock"] = self.current_stock.value()
-            # Default location_id (should come from current user/session)
-            # For now, we'll try to get it from the user object if available
-            # Note: The server requires location_id
-            # We'll need to handle this properly
-            pass
+        # Prepare data based on create vs update
+        if self.is_edit:
+            # Update: exclude sku and location_id (not allowed in updates)
+            data = {
+                "name": name,
+                "barcode": self.barcode_input.text().strip() or None,
+                "description": self.description_input.toPlainText().strip() or None,
+                "category_id": to_uuid_str(self.category_combo.currentData()),
+                "supplier_id": to_uuid_str(self.supplier_combo.currentData()),
+                "selling_price": price,
+                "cost_price": self.cost_price.value() if self.cost_price.value() > 0 else None,
+                "unit": self.unit_input.text().strip() or "pcs",
+                "min_stock_level": self.min_stock.value() if self.min_stock.value() > 0 else None,
+                "allow_negative_stock": self.allow_negative.isChecked(),
+            }
+        else:
+            # Create: include all fields including sku and location_id
+            data = {
+                "sku": sku,
+                "name": name,
+                "barcode": self.barcode_input.text().strip() or None,
+                "description": self.description_input.toPlainText().strip() or None,
+                "category_id": to_uuid_str(self.category_combo.currentData()),
+                "supplier_id": to_uuid_str(self.supplier_combo.currentData()),
+                "selling_price": price,
+                "cost_price": self.cost_price.value() if self.cost_price.value() > 0 else None,
+                "unit": self.unit_input.text().strip() or "pcs",
+                "min_stock_level": self.min_stock.value() if self.min_stock.value() > 0 else None,
+                "allow_negative_stock": self.allow_negative.isChecked(),
+                "current_stock": self.current_stock.value(),
+            }
 
         try:
             if self.is_edit:
