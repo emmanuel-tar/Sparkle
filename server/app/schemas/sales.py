@@ -26,8 +26,8 @@ class SaleItemCreate(BaseModel):
 
 class SaleCreate(BaseModel):
     """Sale creation schema."""
-    
-    location_id: UUID
+
+    location_id: Optional[UUID] = None
     terminal_id: Optional[str] = None
     customer_id: Optional[UUID] = None
     
@@ -69,12 +69,12 @@ class SaleItemResponse(BaseModel):
 
 class SaleResponse(BaseModel):
     """Sale response schema."""
-    
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     receipt_number: str
-    location_id: UUID
+    location_id: Optional[UUID]
     terminal_id: Optional[str]
     customer_id: Optional[UUID]
     customer: Optional[CustomerResponse] = None

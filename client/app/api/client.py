@@ -278,28 +278,29 @@ class APIClient:
         raise APIError(f"Failed to download file: {response.text}", response.status_code)
 
     def upload_file(self, endpoint: str, file_path: str) -> Dict[str, Any]:
-        """POST request with file upload."""
-        # Get auth headers
-        auth_headers = self._get_headers().copy()
-        # For multipart requests, we only need Authorization header
-        # httpx will automatically set Content-Type: multipart/form-data
-        headers = {k: v for k, v in auth_headers.items() if k == "Authorization"}
-        
-        # Ensure endpoint doesn't start with / to correctly join with base_url
+        """POST request with file upload using fresh request without conflicting headers."""
         clean_endpoint = endpoint.lstrip("/")
+        url = self._base_url + clean_endpoint
         
         try:
-            # Read file content first to keep it in memory during the request
+            # Read file content
             file_content = Path(file_path).read_bytes()
+            file_name = Path(file_path).name
             
-            # Create multipart form data
-            # The field name MUST be "file" to match FastAPI's UploadFile parameter
-            files = {"file": (Path(file_path).name, file_content, "text/csv")}
-            response = self.client.post(
-                clean_endpoint,
-                headers=headers,
-                files=files
-            )
+            # Build headers with only auth
+            headers = {}
+            if self._access_token:
+                headers["Authorization"] = f"Bearer {self._access_token}"
+            
+            # Create a fresh httpx client just for this request to avoid header conflicts
+            with httpx.Client(timeout=self.timeout) as upload_client:
+                # Use the files parameter which httpx will automatically encode as multipart
+                response = upload_client.post(
+                    url,
+                    headers=headers,
+                    files={"file": (file_name, file_content)}
+                )
+            
             return self._handle_response(response)
         except FileNotFoundError:
             raise APIError(f"File not found: {file_path}", 0)

@@ -120,7 +120,7 @@ async def create_sale(
 ):
     """
     Create a new sale (POS transaction).
-    
+
     This endpoint:
     1. Validates all items exist and have sufficient stock
     2. Calculates totals with tax and discounts
@@ -128,6 +128,14 @@ async def create_sale(
     4. Awards loyalty points if customer is provided
     5. Creates the sale record
     """
+    # Determine location ID
+    final_location_id = request.location_id
+    if final_location_id is None:
+        final_location_id = current_user.location_id
+
+    if final_location_id is None:
+        raise BadRequestException("Location ID is required for sales")
+
     # Validate items and calculate totals
     sale_items = []
     subtotal = 0.0
@@ -239,7 +247,7 @@ async def create_sale(
     # Create sale
     sale = Sale(
         receipt_number=receipt_number,
-        location_id=request.location_id,
+        location_id=final_location_id,
         terminal_id=request.terminal_id,
         customer_id=request.customer_id,
         cashier_id=current_user.id,

@@ -63,10 +63,10 @@ class Sale(Base, UUIDMixin, TimestampMixin):
     receipt_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     
     # Location and Terminal
-    location_id: Mapped[uuid.UUID] = mapped_column(
+    location_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         GUIDType,
         ForeignKey("locations.id"),
-        nullable=False,
+        nullable=True,
     )
     terminal_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     
@@ -118,8 +118,8 @@ class Sale(Base, UUIDMixin, TimestampMixin):
     # Denormalized items for quick access (JSON copy of items)
     items_snapshot: Mapped[Optional[list]] = mapped_column(JSON, default=list)
     
-    # Metadata
-    extra_metadata: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    # Additional metadata
+    additional_metadata: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     
     # Relationships
     location: Mapped["Location"] = relationship(

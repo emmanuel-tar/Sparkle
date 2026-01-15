@@ -6,12 +6,17 @@ Point of Sale interface for processing transactions.
 
 from decimal import Decimal
 from typing import Optional, Dict, List
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QSpinBox, QDoubleSpinBox, QMessageBox,
-    QComboBox, QGridLayout, QSizePolicy,
+    QComboBox, QGridLayout, QSizePolicy, QListWidget,
+    QListWidgetItem, QDialog, QDialogButtonBox, QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont
@@ -52,6 +57,8 @@ class POSView(QWidget):
         self.user = user
         self.cart: List[CartItem] = []
         self.current_customer: Optional[dict] = None
+        self.held_orders_file = Path(settings.DATA_DIR) / "held_orders.json"
+        self.last_sale_data = None  # Store last completed sale for printing
         self._setup_ui()
     
     def _setup_ui(self):
@@ -117,24 +124,52 @@ class POSView(QWidget):
         
         # Quick actions
         actions_layout = QHBoxLayout()
-        
+
         clear_btn = QPushButton("Clear Cart")
         clear_btn.setObjectName("danger")
         clear_btn.clicked.connect(self._clear_cart)
         actions_layout.addWidget(clear_btn)
-        
+
+        # Bulk quantity update
+        bulk_layout = QVBoxLayout()
+        bulk_layout.setContentsMargins(0, 0, 0, 0)
+
+        bulk_label = QLabel("Bulk Qty:")
+        bulk_label.setStyleSheet("font-size: 10px; color: #666;")
+        bulk_layout.addWidget(bulk_label)
+
+        self.bulk_qty_input = QSpinBox()
+        self.bulk_qty_input.setMinimum(1)
+        self.bulk_qty_input.setMaximum(999)
+        self.bulk_qty_input.setValue(1)
+        self.bulk_qty_input.setFixedWidth(60)
+        self.bulk_qty_input.setStyleSheet("QSpinBox { padding: 2px; }")
+        bulk_layout.addWidget(self.bulk_qty_input)
+
+        actions_layout.addLayout(bulk_layout)
+
+        bulk_apply_btn = QPushButton("Apply to Selected")
+        bulk_apply_btn.setObjectName("secondary")
+        bulk_apply_btn.clicked.connect(self._apply_bulk_quantity)
+        actions_layout.addWidget(bulk_apply_btn)
+
         actions_layout.addStretch()
-        
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #2ed573; font-weight: bold;")
         actions_layout.addWidget(self.status_label)
-        
+
         actions_layout.addStretch()
-        
+
         hold_btn = QPushButton("Hold Order")
         hold_btn.clicked.connect(self._hold_order)
         actions_layout.addWidget(hold_btn)
-        
+
+        # Print last receipt button
+        print_btn = QPushButton("Print Receipt")
+        print_btn.clicked.connect(self._print_last_receipt)
+        actions_layout.addWidget(print_btn)
+
         layout.addLayout(actions_layout)
         
         return panel
@@ -221,6 +256,7 @@ class POSView(QWidget):
         self.payment_combo = QComboBox()
         self.payment_combo.addItems(["Cash", "Card", "Transfer", "Mobile Money"])
         self.payment_combo.setMinimumHeight(40)
+        self.payment_combo.currentTextChanged.connect(self._on_payment_method_changed)
         layout.addWidget(self.payment_combo)
         
         # Amount tendered (for cash)
@@ -376,11 +412,30 @@ class POSView(QWidget):
         tax = sum(item.tax_amount for item in self.cart)
         discount = self.discount_input.value()
         total = subtotal + tax - discount
-        
+
         tendered = self.tendered_input.value()
         change = max(0, tendered - total)
-        
+
         self.change_label.setText(f"Change: {settings.CURRENCY_SYMBOL}{change:.2f}")
+
+    def _on_payment_method_changed(self, payment_method: str):
+        """Handle payment method change."""
+        if payment_method.lower() == "cash":
+            # Auto-fill tendered amount with total for cash payments
+            subtotal = sum(item.subtotal for item in self.cart)
+            tax = sum(item.tax_amount for item in self.cart)
+            discount = self.discount_input.value()
+            total = subtotal + tax - discount
+            self.tendered_input.setValue(total)
+            self.tendered_label.setText("Amount Tendered")
+            self.tendered_input.setEnabled(True)
+            self.change_label.setVisible(True)
+        else:
+            # For non-cash payments, disable tendered input
+            self.tendered_input.setValue(0)
+            self.tendered_label.setText("Amount Tendered (Cash only)")
+            self.tendered_input.setEnabled(False)
+            self.change_label.setVisible(False)
     
     def _lookup_customer(self):
         """Lookup customer by phone."""
@@ -417,15 +472,192 @@ class POSView(QWidget):
     
     def _hold_order(self):
         """Hold current order for later."""
-        # TODO: Implement hold order functionality
-        QMessageBox.information(self, "Hold Order", "This feature is coming soon!")
+        if not self.cart:
+            QMessageBox.warning(self, "Empty Cart", "Please add items to the cart first.")
+            return
+
+        # Get order name from user
+        order_name, ok = QInputDialog.getText(
+            self,
+            "Hold Order",
+            "Enter a name for this order:",
+            text=f"Order {datetime.now().strftime('%H:%M')}"
+        )
+
+        if not ok or not order_name.strip():
+            return
+
+        # Save order data
+        order_data = {
+            "id": str(uuid.uuid4()),
+            "name": order_name.strip(),
+            "timestamp": datetime.now().isoformat(),
+            "customer": self.current_customer,
+            "discount": self.discount_input.value(),
+            "items": [
+                {
+                    "id": str(item.id),
+                    "sku": item.sku,
+                    "name": item.name,
+                    "unit_price": item.unit_price,
+                    "quantity": item.quantity,
+                    "tax_rate": item.tax_rate,
+                }
+                for item in self.cart
+            ]
+        }
+
+        try:
+            # Load existing orders
+            held_orders = []
+            if self.held_orders_file.exists():
+                with open(self.held_orders_file, 'r') as f:
+                    held_orders = json.load(f)
+
+            # Add new order
+            held_orders.append(order_data)
+
+            # Save back to file
+            with open(self.held_orders_file, 'w') as f:
+                json.dump(held_orders, f, indent=2)
+
+            # Clear cart
+            self.cart.clear()
+            self.current_customer = None
+            self.customer_input.clear()
+            self.customer_info_label.setText("No customer selected (Walk-in)")
+            self.customer_info_label.setStyleSheet("color: #888888;")
+            self.discount_input.setValue(0)
+            self._refresh_cart_table()
+
+            QMessageBox.information(self, "Order Held", f"Order '{order_name}' has been saved for later.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save order: {str(e)}")
+
+    def _apply_bulk_quantity(self):
+        """Apply bulk quantity to selected items."""
+        selected_rows = set()
+        for item in self.cart_table.selectedItems():
+            selected_rows.add(item.row())
+
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select items in the cart first.")
+            return
+
+        bulk_qty = self.bulk_qty_input.value()
+        for row in selected_rows:
+            if 0 <= row < len(self.cart):
+                self.cart[row].quantity = bulk_qty
+
+        self._refresh_cart_table()
+        self.status_label.setText(f"✓ Applied quantity {bulk_qty} to {len(selected_rows)} items")
+
+    def _print_last_receipt(self):
+        """Print the last completed receipt."""
+        if not self.last_sale_data:
+            QMessageBox.warning(self, "No Receipt", "No recent sale to print.")
+            return
+
+        try:
+            # Generate receipt text
+            receipt_lines = []
+            receipt_lines.append("=" * 40)
+            receipt_lines.append("         SPARKLE RETAIL")
+            receipt_lines.append("     Point of Sale Receipt")
+            receipt_lines.append("=" * 40)
+            receipt_lines.append(f"Receipt: {self.last_sale_data['receipt_number']}")
+            receipt_lines.append(f"Date: {datetime.fromisoformat(self.last_sale_data['created_at']).strftime('%Y-%m-%d %H:%M:%S')}")
+
+            if self.last_sale_data.get('customer'):
+                customer = self.last_sale_data['customer']
+                receipt_lines.append(f"Customer: {customer.get('first_name', '')} {customer.get('last_name', '')}")
+
+            receipt_lines.append("-" * 40)
+
+            # Items header
+            receipt_lines.append(f"{'SKU':<10} {'Item':<15} {'Qty':>3} {'Total':>8}")
+            receipt_lines.append("-" * 40)
+
+            for item in self.last_sale_data['items']:
+                sku = item['sku'][:10]
+                name = item['name'][:15]
+                qty = f"{item['quantity']:.1f}"
+                total = f"{settings.CURRENCY_SYMBOL}{item['line_total']:.2f}"
+                receipt_lines.append(f"{sku:<10} {name:<15} {qty:>3} {total:>8}")
+
+            receipt_lines.append("-" * 40)
+
+            # Totals
+            subtotal = self.last_sale_data['subtotal']
+            tax = self.last_sale_data['tax_amount']
+            discount = self.last_sale_data['discount_amount']
+            total = self.last_sale_data['total_amount']
+
+            receipt_lines.append(f"{'Subtotal:':<30} {settings.CURRENCY_SYMBOL}{subtotal:.2f}")
+            if tax > 0:
+                receipt_lines.append(f"{'Tax:':<30} {settings.CURRENCY_SYMBOL}{tax:.2f}")
+            if discount > 0:
+                receipt_lines.append(f"{'Discount:':<30} {settings.CURRENCY_SYMBOL}{discount:.2f}")
+            receipt_lines.append(f"{'TOTAL:':<30} {settings.CURRENCY_SYMBOL}{total:.2f}")
+
+            receipt_lines.append("-" * 40)
+            receipt_lines.append(f"Payment: {self.last_sale_data['payment_method'].upper()}")
+
+            if self.last_sale_data.get('change_given', 0) > 0:
+                receipt_lines.append(f"Change: {settings.CURRENCY_SYMBOL}{self.last_sale_data['change_given']:.2f}")
+
+            receipt_lines.append("=" * 40)
+            receipt_lines.append("     Thank you for shopping!")
+            receipt_lines.append("       Visit us again soon!")
+            receipt_lines.append("=" * 40)
+
+            # Join all lines
+            receipt_text = "\n".join(receipt_lines)
+
+            # For now, show in message box (later can integrate with printer)
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Receipt Preview")
+            msg_box.setText("Receipt generated successfully!")
+            msg_box.setDetailedText(receipt_text)
+            msg_box.setStandardButtons(QMessageBox.Ok)
+
+            # Add print button
+            print_button = msg_box.addButton("Print Receipt", QMessageBox.ActionRole)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == print_button:
+                self._print_receipt_text(receipt_text)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Print Error", f"Failed to generate receipt: {str(e)}")
+
+    def _print_receipt_text(self, receipt_text: str):
+        """Print receipt text (placeholder for actual printing)."""
+        try:
+            # For now, save to file as placeholder
+            receipt_file = Path(settings.DATA_DIR) / f"receipt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            receipt_file.write_text(receipt_text)
+
+            QMessageBox.information(
+                self,
+                "Receipt Saved",
+                f"Receipt saved to:\n{receipt_file}\n\nIn a real implementation, this would be sent to a thermal printer."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Print Error", f"Failed to save receipt: {str(e)}")
     
     def _complete_sale(self):
         """Complete the sale transaction."""
         if not self.cart:
             QMessageBox.warning(self, "Empty Cart", "Please add items to the cart first.")
             return
-        
+
+        # Check if user has location_id
+        if not self.user.get("location_id"):
+            QMessageBox.warning(self, "Location Required", "Please set your location before completing sales.")
+            return
+
         # Calculate totals
         subtotal = sum(item.subtotal for item in self.cart)
         tax = sum(item.tax_amount for item in self.cart)
@@ -444,8 +676,8 @@ class POSView(QWidget):
         
         # Build sale data
         sale_data = {
-            "location_id": str(self.user.get("location_id")) if self.user.get("location_id") else None,
-            "customer_id": str(self.current_customer["id"]) if self.current_customer else None,
+            "location_id": self.user.get("location_id") if self.user.get("location_id") else None,
+            "customer_id": self.current_customer["id"] if self.current_customer else None,
             "items": [
                 {
                     "item_id": str(item.id),
@@ -463,7 +695,10 @@ class POSView(QWidget):
         
         try:
             result = api_client.create_sale(sale_data)
-            
+
+            # Store sale data for receipt printing
+            self.last_sale_data = result
+
             # Show success
             change = tendered - total if payment_method == "cash" else 0
             QMessageBox.information(
@@ -473,7 +708,7 @@ class POSView(QWidget):
                 f"Total: {settings.CURRENCY_SYMBOL}{total:.2f}\n"
                 + (f"Change: {settings.CURRENCY_SYMBOL}{change:.2f}" if change > 0 else ""),
             )
-            
+
             # Reset
             self.cart.clear()
             self.current_customer = None

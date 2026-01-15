@@ -11,8 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
-from app.api import deps
-from app.database import get_db
+from app.api.deps import CurrentUser, DBSession, require_role, require_permission
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem, POStatus
 from app.models.inventory import InventoryItem, StockMovement, MovementType
 from app.models.supplier import Supplier
@@ -23,12 +22,12 @@ router = APIRouter()
 
 @router.get("/", response_model=List[schemas.PurchaseOrderSummary])
 async def list_purchase_orders(
+    current_user: CurrentUser,
+    db: DBSession,
     skip: int = 0,
     limit: int = 100,
     status: Optional[POStatus] = None,
     supplier_id: Optional[uuid.UUID] = None,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
 ):
     """
     Retrieve purchase orders.
@@ -63,8 +62,8 @@ async def list_purchase_orders(
 @router.post("/", response_model=schemas.PurchaseOrder, status_code=status.HTTP_201_CREATED)
 async def create_purchase_order(
     po_in: schemas.PurchaseOrderCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """
     Create a new purchase order.
@@ -120,8 +119,8 @@ async def create_purchase_order(
 @router.get("/{po_id}", response_model=schemas.PurchaseOrder)
 async def get_purchase_order(
     po_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
+    current_user: CurrentUser,
+    db: DBSession,
 ):
     """
     Get purchase order by ID.
@@ -138,8 +137,8 @@ from sqlalchemy.orm import selectinload
 async def update_purchase_order(
     po_id: uuid.UUID,
     po_in: schemas.PurchaseOrderUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """
     Update a purchase order status or details.
@@ -211,8 +210,8 @@ async def update_purchase_order(
 @router.delete("/{po_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_purchase_order(
     po_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """
     Delete a purchase order (only if PENDING or CANCELLED).
@@ -232,8 +231,8 @@ async def delete_purchase_order(
 @router.get("/suggest/{supplier_id}", response_model=List[schemas.PurchaseOrderItemCreate])
 async def suggest_po_items(
     supplier_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user = Depends(deps.get_current_active_user),
+    db: DBSession,
+    current_user: CurrentUser,
 ):
     """
     Suggest items to order from a supplier based on low stock levels.
