@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont, QIcon, QPixmap
+from pathlib import Path
+import datetime
 
 from app.api import api_client, APIError
 from app.ui.dialogs.product_dialog import ProductDialog
@@ -521,7 +523,7 @@ class InventoryView(QWidget):
             # Available Stock
             available = product.get("available_stock", 0)
             avail_item = QTableWidgetItem(f"{available:.2f}")
-            avail_item.setStyleSheet("color: #0066cc;")
+            avail_item.setForeground(Qt.blue)  # Blue color for available stock
             self.table.setItem(i, 4, avail_item)
             
             # Unit
@@ -558,7 +560,7 @@ class InventoryView(QWidget):
                 shelf_life = product.get("shelf_life_days")
                 expiry_text = f"{shelf_life}d" if shelf_life else "Yes"
                 expiry_item = QTableWidgetItem(expiry_text)
-                expiry_item.setStyleSheet("color: #ff6b6b;")
+                expiry_item.setForeground(Qt.red)  # Red for expiry items
             else:
                 expiry_item = QTableWidgetItem("—")
             self.table.setItem(i, 9, expiry_item)
@@ -594,7 +596,7 @@ class InventoryView(QWidget):
             can_manage = api_client.has_permission("manage_inventory")
             is_admin = api_client.user_role in ["super_admin", "admin"]
             
-            edit_btn = create_action_btn("✏️", "Edit", lambda _, p=product: self._on_edit_product(p))
+            edit_btn = create_action_btn("✏️", "Edit Product", lambda _, p=product: self._on_edit_product(p), "#4dabf7")
             edit_btn.setEnabled(can_manage)
             actions_layout.addWidget(edit_btn)
             
@@ -602,13 +604,25 @@ class InventoryView(QWidget):
             adjust_btn.setEnabled(can_manage)
             actions_layout.addWidget(adjust_btn)
             
-            history_btn = create_action_btn("📜", "History", lambda _, p=product: self._on_view_history(p), "#63e6be")
+            history_btn = create_action_btn("📜", "View History", lambda _, p=product: self._on_view_history(p), "#63e6be")
             actions_layout.addWidget(history_btn)
             
-            delete_btn = create_action_btn("🗑️", "Delete", lambda _, p=product: self._on_delete_product(p), "#ff6b6b")
+            # Unavailable toggle button (admin only)
+            is_active = product.get("is_active", True)
+            unavail_text = "🔓 Activate" if not is_active else "🔒 Deactivate"
+            unavail_tooltip = "Activate product" if not is_active else "Deactivate product"
+            unavail_color = "#ffa94d" if not is_active else "#868e96"
+            unavail_btn = create_action_btn(unavail_text, unavail_tooltip, 
+                                          lambda _, p=product: self._on_toggle_availability(p), unavail_color)
+            unavail_btn.setEnabled(is_admin)
+            if not is_admin:
+                unavail_btn.setStyleSheet(unavail_btn.styleSheet() + "QPushButton { opacity: 0.4; }")
+            actions_layout.addWidget(unavail_btn)
+            
+            delete_btn = create_action_btn("🗑️", "Delete Permanently", lambda _, p=product: self._on_delete_product(p), "#ff6b6b")
             delete_btn.setEnabled(is_admin)
             if not is_admin:
-                delete_btn.setStyleSheet(delete_btn.styleSheet() + "QPushButton { opacity: 0.5; }")
+                delete_btn.setStyleSheet(delete_btn.styleSheet() + "QPushButton { opacity: 0.4; }")
             actions_layout.addWidget(delete_btn)
             
             actions_layout.addStretch()
@@ -690,74 +704,286 @@ class InventoryView(QWidget):
     
     def _on_add_product(self):
         """Show dialog to add a new product."""
-        dialog = ProductDialog(self)
-        if dialog.exec():
-            self._load_data()
+        try:
+            dialog = ProductDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                # Reload data after successful creation
+                self._load_data()
+                QMessageBox.information(self, "Success", "Product added successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open product dialog: {str(e)}")
     
     def _on_edit_product(self, product: dict):
         """Show dialog to edit an existing product."""
-        dialog = ProductDialog(self, product)
-        if dialog.exec():
-            self._load_data()
+        try:
+            if not api_client.has_permission("manage_inventory"):
+                QMessageBox.warning(self, "Permission Denied", "You don't have permission to edit products")
+                return
+            
+            product_name = product.get("name", "Unknown")
+            dialog = ProductDialog(self, product)
+            if dialog.exec() == QDialog.Accepted:
+                # Reload data after successful update
+                self._load_data()
+                QMessageBox.information(self, "Success", f"'{product_name}' updated successfully!")
+        except APIError as e:
+            QMessageBox.critical(self, "API Error", f"Failed to edit product: {e.message}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
     
     def _on_adjust_stock(self, product: dict):
         """Show dialog to adjust stock levels."""
-        dialog = StockDialog(self, product)
-        if dialog.exec():
-            self._load_data()
+        try:
+            if not api_client.has_permission("manage_inventory"):
+                QMessageBox.warning(self, "Permission Denied", "You don't have permission to adjust stock")
+                return
+            
+            product_name = product.get("name", "Unknown")
+            dialog = StockDialog(self, product)
+            if dialog.exec() == QDialog.Accepted:
+                # Reload data after successful adjustment
+                self._load_data()
+                QMessageBox.information(self, "Success", f"Stock for '{product_name}' adjusted successfully!")
+        except APIError as e:
+            QMessageBox.critical(self, "API Error", f"Failed to adjust stock: {e.message}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
     
     def _on_view_history(self, product: dict):
         """Show product movement history."""
-        dialog = HistoryDialog(self, product)
-        dialog.exec()
+        try:
+            product_name = product.get("name", "Unknown")
+            self.setWindowTitle(f"Inventory Management - Loading {product_name} History...")
+            
+            dialog = HistoryDialog(self, product)
+            dialog.exec()
+            
+            self.setWindowTitle("Inventory Management")
+        except APIError as e:
+            QMessageBox.critical(self, "API Error", f"Failed to load history: {e.message}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to view history: {str(e)}")
+    
+    def _on_toggle_availability(self, product: dict):
+        """Toggle product availability (activate/deactivate)."""
+        try:
+            is_admin = api_client.user_role in ["super_admin", "admin"]
+            if not is_admin:
+                QMessageBox.warning(self, "Permission Denied", 
+                    "Only administrators can change product status")
+                return
+            
+            product_name = product.get("name", "Unknown")
+            is_active = product.get("is_active", True)
+            
+            if is_active:
+                # Deactivate the product
+                message = f"Do you want to deactivate '{product_name}'?\n\n"
+                message += "It will be hidden from sales operations.\n"
+                message += f"Current stock: {product.get('current_stock', 0)} units\n\n"
+                message += "⚠️ The product data will be preserved for historical records."
+                action = "deactivate"
+                new_status = False
+                success_msg = "Product has been deactivated"
+            else:
+                # Activate the product
+                message = f"Do you want to reactivate '{product_name}'?\n\n"
+                message += "It will be visible in sales and inventory operations again."
+                action = "activate"
+                new_status = True
+                success_msg = "Product has been activated"
+            
+            reply = QMessageBox.question(
+                self, f"Confirm {action.capitalize()}",
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                try:
+                    # Send update to server
+                    api_client.patch(f"/inventory/items/{product['id']}", {
+                        "is_active": new_status
+                    })
+                    QMessageBox.information(self, "Success", success_msg)
+                    self._load_data()
+                except APIError as e:
+                    QMessageBox.critical(self, "Update Failed", f"Error: {e.message}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
     
     def _on_delete_product(self, product):
-        """Handle product deletion."""
-        reply = QMessageBox.question(
-            self, "Confirm Delete",
-            f"Are you sure you want to delete {product.get('name')}?\nThis will deactivate the product.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            try:
-                api_client.delete_item(product["id"])
-                self._load_data()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
+        """Handle product deletion/deactivation."""
+        try:
+            is_admin = api_client.user_role in ["super_admin", "admin"]
+            if not is_admin:
+                QMessageBox.warning(self, "Permission Denied", 
+                    "Only administrators can delete products")
+                return
+            
+            product_name = product.get("name", "Unknown")
+            current_stock = product.get("current_stock", 0)
+            
+            # Additional warnings for products with stock
+            message = f"Are you sure you want to delete '{product_name}'?\n\n"
+            
+            if current_stock > 0:
+                message += f"⚠️ WARNING: This product has {current_stock} units in stock.\n"
+                message += "Please adjust stock before deletion.\n\n"
+                
+                reply = QMessageBox.warning(
+                    self, "Cannot Delete - Stock Available",
+                    message + "This action cannot be performed.",
+                    QMessageBox.Ok
+                )
+                return
+            
+            message += "This action will permanently remove the product from the system."
+            
+            # Final confirmation
+            reply = QMessageBox.warning(
+                self, "Confirm Delete",
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No  # Default to No for safety
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Disable button during operation
+                sender = self.sender()
+                if sender:
+                    sender.setEnabled(False)
+                    sender.setText("Deleting...")
+                
+                try:
+                    api_client.delete_item(product["id"])
+                    QMessageBox.information(self, "Success", f"'{product_name}' has been deleted successfully!")
+                    self._load_data()
+                except APIError as e:
+                    QMessageBox.critical(self, "Delete Failed", f"Error: {e.message}")
+                finally:
+                    if sender:
+                        sender.setEnabled(True)
+                        sender.setText("🗑️ Delete")
+                        
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An unexpected error occurred: {str(e)}")
     
     # ============== Bulk Operations ==============
     
     def _on_export_inventory(self):
-        """Export inventory to CSV."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Inventory", "inventory_export.csv", "CSV Files (*.csv)"
-        )
-        if path:
+        """Export inventory to CSV with progress feedback."""
+        try:
+            # Get default filename with date
+            default_name = f"inventory_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Inventory", default_name, "CSV Files (*.csv)"
+            )
+            
+            if not path:
+                return
+            
+            # Show progress
+            progress_text = "Exporting inventory..."
+            self.stats_label.setText(progress_text)
+            self.refresh_btn.setEnabled(False)
+            
             try:
+                # Fetch export data
                 data = api_client.export_inventory()
+                
+                # Write to file
                 with open(path, "wb") as f:
                     f.write(data)
-                QMessageBox.information(self, "Success", "Inventory exported successfully!")
+                
+                # Calculate file size
+                file_size = len(data) / 1024  # KB
+                file_size_text = f"{file_size:.1f} KB" if file_size < 1024 else f"{file_size/1024:.1f} MB"
+                
+                # Get item count from CSV
+                csv_text = data.decode('utf-8')
+                lines = csv_text.strip().split('\n')
+                item_count = len(lines) - 1  # Subtract header
+                
+                success_msg = (
+                    f"✓ Export Successful!\n\n"
+                    f"File: {Path(path).name}\n"
+                    f"Items: {item_count}\n"
+                    f"Size: {file_size_text}\n\n"
+                    f"Saved to:\n{path}"
+                )
+                QMessageBox.information(self, "Export Complete", success_msg)
+                
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed: {e}")
+                QMessageBox.critical(self, "Export Failed", f"Error: {str(e)}")
+            finally:
+                self.refresh_btn.setEnabled(True)
+                self._load_data()
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open export dialog: {str(e)}")
     
     def _on_import_inventory(self):
         """Import inventory from CSV using the import dialog."""
-        dialog = ImportDialog(self)
-        if dialog.exec() == QDialog.Accepted:
-            self._load_data()
-            QMessageBox.information(self, "Success", "Inventory reloaded!")
+        try:
+            dialog = ImportDialog(self)
+            if dialog.exec() == QDialog.Accepted:
+                # Check if import was successful
+                result = dialog.import_result
+                if result and result.get('success'):
+                    # Reload data after successful import
+                    self._load_data()
+                    
+                    # Show summary
+                    imported = result.get('imported_count', 0)
+                    updated = result.get('updated_count', 0)
+                    total = imported + updated
+                    
+                    summary_msg = (
+                        f"✓ Import Complete!\n\n"
+                        f"Items Imported: {imported}\n"
+                        f"Items Updated: {updated}\n"
+                        f"Total: {total}\n\n"
+                        f"Inventory has been updated."
+                    )
+                    QMessageBox.information(self, "Import Successful", summary_msg)
+                elif result:
+                    # Partial success - reload anyway
+                    self._load_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to import: {str(e)}")
     
     def _on_download_template(self):
         """Download import template."""
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Template", "inventory_template.csv", "CSV Files (*.csv)"
-        )
-        if path:
+        try:
+            default_name = f"inventory_template_{datetime.datetime.now().strftime('%Y%m%d')}.csv"
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Import Template", default_name, "CSV Files (*.csv)"
+            )
+            if not path:
+                return
+            
+            self.stats_label.setText("Downloading template...")
+            self.refresh_btn.setEnabled(False)
+            
             try:
                 data = api_client.get_import_template()
                 with open(path, "wb") as f:
                     f.write(data)
-                QMessageBox.information(self, "Success", "Template saved successfully!")
+                
+                success_msg = (
+                    f"✓ Template Downloaded!\n\n"
+                    f"File: {Path(path).name}\n\n"
+                    f"Use this template to prepare your inventory data.\n"
+                    f"Required columns are marked with *"
+                )
+                QMessageBox.information(self, "Success", success_msg)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to download template: {e}")
+                QMessageBox.critical(self, "Download Failed", f"Error: {str(e)}")
+            finally:
+                self.refresh_btn.setEnabled(True)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed: {str(e)}")

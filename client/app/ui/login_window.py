@@ -99,7 +99,7 @@ class LoginWindow(QWidget):
         server_label = QLabel("Server")
         self.server_input = QLineEdit()
         self.server_input.setText(settings.SERVER_URL)
-        self.server_input.setPlaceholderText("http://localhost:8000")
+        self.server_input.setPlaceholderText("http://localhost:8001")
         card_layout.addWidget(server_label)
         card_layout.addWidget(self.server_input)
         

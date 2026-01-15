@@ -25,9 +25,9 @@ class Settings:
     APP_VERSION: str = "1.0.0"
     
     # Server Connection
-    SERVER_URL: str = os.getenv("SERVER_URL", "http://localhost:8000")
+    SERVER_URL: str = os.getenv("SERVER_URL", "http://localhost:8001")
     API_BASE: str = "/api/v1"
-    WS_URL: str = os.getenv("WS_URL", "ws://localhost:8000/ws")
+    WS_URL: str = os.getenv("WS_URL", "ws://localhost:8001/ws")
     
     # Local Database
     DATA_DIR: Path = Path(os.getenv("DATA_DIR", "./data"))
