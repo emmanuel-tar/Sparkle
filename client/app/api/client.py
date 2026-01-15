@@ -289,16 +289,18 @@ class APIClient:
         clean_endpoint = endpoint.lstrip("/")
         
         try:
-            with open(file_path, "rb") as f:
-                # Create multipart form data
-                # The field name MUST be "file" to match FastAPI's UploadFile parameter
-                files = {"file": (Path(file_path).name, f, "text/csv")}
-                response = self.client.post(
-                    clean_endpoint,
-                    headers=headers,
-                    files=files
-                )
-                return self._handle_response(response)
+            # Read file content first to keep it in memory during the request
+            file_content = Path(file_path).read_bytes()
+            
+            # Create multipart form data
+            # The field name MUST be "file" to match FastAPI's UploadFile parameter
+            files = {"file": (Path(file_path).name, file_content, "text/csv")}
+            response = self.client.post(
+                clean_endpoint,
+                headers=headers,
+                files=files
+            )
+            return self._handle_response(response)
         except FileNotFoundError:
             raise APIError(f"File not found: {file_path}", 0)
         except Exception as e:

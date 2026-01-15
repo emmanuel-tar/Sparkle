@@ -189,12 +189,20 @@ class ImportDialog(QDialog):
             data_rows = rows[1:] if len(rows) > 1 else []
             
             # Check for required columns (SKU, Name, Selling Price)
+            # Normalize headers: lowercase and replace spaces/underscores
+            header_normalized = [h.lower().strip().replace(' ', '_').replace('-', '_') for h in header]
+            
+            # Required columns can have variations
             required_cols = {'sku', 'name', 'selling_price'}
-            header_lower = [h.lower().strip() for h in header]
-            missing_cols = required_cols - set(header_lower)
+            missing_cols = []
+            
+            for req_col in required_cols:
+                if req_col not in header_normalized:
+                    missing_cols.append(req_col)
             
             if missing_cols:
-                msg = f"Missing required columns: {', '.join(missing_cols)}"
+                msg = f"Missing required columns: {', '.join(missing_cols)}\n\n" \
+                      f"Found columns: {', '.join(header)}"
                 QMessageBox.warning(self, "Invalid CSV Format", msg)
                 self.selected_file = None
                 self.import_btn.setEnabled(False)
@@ -221,6 +229,7 @@ class ImportDialog(QDialog):
             self.selected_file = None
             self.import_btn.setEnabled(False)
     
+    def _on_download_template(self):
         """Download import template."""
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Template", "inventory_template.csv", "CSV Files (*.csv)"
