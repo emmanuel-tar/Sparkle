@@ -318,7 +318,7 @@ async def create_sale(
                 "tax_amount": float(item.tax_amount),
                 "line_total": float(item.line_total),
             }
-            for item in sale_items  # Use the items we created (they have IDs after commit)
+            for item in sale.items  # Use the items from the refreshed sale
         ],
         "customer": None,  # Customer is optional and not loaded here
     }
